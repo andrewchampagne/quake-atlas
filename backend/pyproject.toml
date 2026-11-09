@@ -1,0 +1,50 @@
+[project]
+name = "quakes"
+version = "0.1.0"
+description = "Ingest, clean and serve historical earthquake catalogs (USGS ComCat + NOAA NCEI)."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "duckdb>=1.1",
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "pyarrow>=17",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.scripts]
+quakes = "quakes.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/quakes"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N", "PTH"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]  # long literal fixtures (CSV rows)
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # Third-party: starlette.testclient prefers httpx2; harmless for our tests.
+    "ignore::DeprecationWarning:fastapi.testclient",
+    "ignore:Using `httpx` with `starlette.testclient`",
+]
