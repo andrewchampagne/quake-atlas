@@ -1,0 +1,23 @@
+# Run Quake Atlas at http://localhost:8000
+#
+#   docker compose up -d          # pulls the prebuilt image (or builds it if you add --build)
+#   docker compose logs -f        # watch the first-run download
+#   docker compose down           # stop (data stays in the quake-data volume)
+#
+# Full historical catalog instead of the sample: set QUAKES_DATASET=full below,
+# then `docker compose down -v && docker compose up -d` to rebuild the data.
+services:
+  quake-atlas:
+    image: ghcr.io/__OWNER__/quake-atlas:latest
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      QUAKES_DATASET: sample # or "full"
+      QUAKES_MIN_MAG: "4.5" # magnitude floor for the full dataset
+    volumes:
+      - quake-data:/data
+    restart: unless-stopped
+
+volumes:
+  quake-data:

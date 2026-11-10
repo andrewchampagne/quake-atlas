@@ -1,0 +1,12 @@
+# Store text with LF line endings everywhere (Windows checkouts included), so the
+# repo, CI and Docker builds see identical files.
+* text=auto eol=lf
+
+# Shell scripts must stay LF or they fail inside Linux containers.
+*.sh text eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.parquet binary
+*.joblib binary

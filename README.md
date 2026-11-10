@@ -1,6 +1,11 @@
 # Quake Atlas
 
-An interactive dark-themed world map of earthquakes from 2150 BCE to today.
+[![CI](https://github.com/__OWNER__/quake-atlas/actions/workflows/ci.yml/badge.svg)](https://github.com/__OWNER__/quake-atlas/actions/workflows/ci.yml)
+[![Docker image](https://github.com/__OWNER__/quake-atlas/actions/workflows/docker.yml/badge.svg)](https://github.com/__OWNER__/quake-atlas/pkgs/container/quake-atlas)
+[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey.svg)](LICENSE)
+
+An interactive dark-themed world map of earthquakes from 2150 BCE to today, with
+recorded death tolls and a "what if" earthquake simulator.
 
 - **Backend:** Python downloads and cleans two catalogs, queries them with DuckDB and serves them through FastAPI.
 - **Frontend:** React and deck.gl draw hundreds of thousands of points on the GPU and filter them there.
@@ -18,11 +23,43 @@ NOAA Hazel ┘  (paginated,  (CSV/JSON   (normalise,  (one schema, zstd)   (Duck
                      React + deck.gl ScatterplotLayer (binary attributes, DataFilterExtension) ◄┘
 ```
 
-## Quick start
+## Run it with Docker (macOS, Windows, Linux)
+
+The easiest way to run Quake Atlas is the prebuilt image, which works on Intel and
+Apple Silicon Macs. You only need [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+
+```bash
+docker run -d --name quake-atlas -p 8000:8000 -v quake-data:/data ghcr.io/__OWNER__/quake-atlas:latest
+```
+
+Open http://localhost:8000. On first start the container downloads the sample
+catalog (USGS M5+ 2000–2024 plus NOAA records) and prepares the simulator, which
+takes a few minutes; watch progress with `docker logs -f quake-atlas`. The data is
+kept in the `quake-data` volume, so later starts are instant.
+
+Or, from a clone of this repository:
+
+```bash
+docker compose up -d        # uses the prebuilt image; add --build to build it locally
+```
+
+**Options** (pass with `-e` or set them in `docker-compose.yml`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `QUAKES_DATASET` | `sample` | `full` downloads USGS from 1900 instead of the 2000–2024 sample (30+ minutes, resumable). |
+| `QUAKES_MIN_MAG` | `4.5` | Magnitude floor for the `full` dataset. |
+| `QUAKES_MAX_POINTS` | `300000` | Point cap before the server downsamples to the strongest events. |
+
+To switch datasets later, remove the volume (`docker rm -f quake-atlas && docker volume rm quake-data`)
+and start again. Any command can be run inside the image, for example
+`docker compose run --rm quake-atlas quakes ingest-full --min-mag 4.5`.
+
+## Local development
 
 **Prerequisites**
 - [uv](https://docs.astral.sh/uv/), which installs Python 3.12 for you.
-- Node 20+ and npm.
+- Node 22 or newer (Node 24 recommended) and npm.
 - `make` (optional; every target has an `npm run` equivalent).
 
 ```bash
@@ -74,6 +111,19 @@ make test      # pytest (backend) + vitest (frontend)
 ```bash
 make lint      # ruff check + ruff format --check + eslint
 ```
+
+## Data sources and licences
+
+| Data | Source | Terms |
+|---|---|---|
+| Earthquakes since 1900 | [USGS ComCat](https://earthquake.usgs.gov/fdsnws/event/1/) | U.S. Government work, public domain |
+| Historical earthquakes and death tolls | [NOAA NCEI Significant Earthquake Database](https://www.ncei.noaa.gov/products/natural-hazards/tsunamis-earthquakes-volcanoes/earthquakes) | U.S. Government work, public domain |
+| City populations and country income groups | [Natural Earth](https://www.naturalearthdata.com/) | Public domain |
+| Basemap tiles | [CARTO](https://carto.com/attributions) Dark Matter, data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors | Free with attribution (shown on the map) |
+| Place search | [Photon](https://photon.komoot.io/) by komoot, data © OpenStreetMap contributors (ODbL) | Free fair-use API with attribution (shown in the results) |
+
+Downloaded data is never committed: `data/` is gitignored and is rebuilt by the
+ingest commands.
 
 ## Data completeness by era (read this before drawing conclusions)
 
@@ -222,9 +272,14 @@ Basemap © [CARTO](https://carto.com/attributions), © OpenStreetMap contributor
 ## Simulator and historical deaths
 
 Use the **Explore history / Simulator** tabs to switch features. In Simulator,
-click the map or enter coordinates, set magnitude and depth, then run a scenario.
-Supported inputs are M5.0–7.9 and depths 1–70 km. It estimates effects of a
-hypothetical earthquake; it does not forecast earthquake occurrence.
+search for a place, click the map or enter coordinates, set magnitude and depth,
+then run a scenario. Magnitudes from M4.0 to M9.5 and depths from 1 to 70 km are
+accepted. The shaking equation was fitted to M5.0–7.9, so other magnitudes are
+extrapolated: the app labels them, and the results list why. Above M7.9 the
+exposure area grows from 300 km to as much as 1,000 km (at M9.5), because great
+earthquakes are felt much further away; a circular footprint still understates
+shaking along a long rupture. It estimates effects of a hypothetical
+earthquake; it does not forecast earthquake occurrence.
 
 To enrich an existing sample and prepare the model:
 
@@ -261,3 +316,8 @@ returns shaking rings, city exposure, fatality bins, historical analogs and mode
 metadata. Out-of-domain inputs return 422; missing model assets return 503.
 The Arrow events payload adds `deaths`: NaN unknown, nonnegative exact count,
 or negative -1 through -4 for NOAA ordinal categories.
+
+## License
+
+The code is released under the [MIT License](LICENSE). Data and map tiles keep the
+terms of their sources listed above.

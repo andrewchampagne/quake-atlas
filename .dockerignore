@@ -1,0 +1,18 @@
+# Keep the build context small and free of local state.
+.git
+.github
+.claude
+.vscode
+.idea
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+frontend/dist
+data
+*.md
+!README.md
+docker-compose.yml
+Dockerfile
+.dockerignore
