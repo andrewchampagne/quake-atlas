@@ -1,7 +1,7 @@
 # Quake Atlas
 
-[![CI](https://github.com/__OWNER__/quake-atlas/actions/workflows/ci.yml/badge.svg)](https://github.com/__OWNER__/quake-atlas/actions/workflows/ci.yml)
-[![Docker image](https://github.com/__OWNER__/quake-atlas/actions/workflows/docker.yml/badge.svg)](https://github.com/__OWNER__/quake-atlas/pkgs/container/quake-atlas)
+[![CI](https://github.com/andrewchampagne/quake-atlas/actions/workflows/ci.yml/badge.svg)](https://github.com/andrewchampagne/quake-atlas/actions/workflows/ci.yml)
+[![Docker image](https://github.com/andrewchampagne/quake-atlas/actions/workflows/docker.yml/badge.svg)](https://github.com/andrewchampagne/quake-atlas/pkgs/container/quake-atlas)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey.svg)](LICENSE)
 
 An interactive dark-themed world map of earthquakes from 2150 BCE to today, with
@@ -29,7 +29,7 @@ The easiest way to run Quake Atlas is the prebuilt image, which works on Intel a
 Apple Silicon Macs. You only need [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 
 ```bash
-docker run -d --name quake-atlas -p 8000:8000 -v quake-data:/data ghcr.io/__OWNER__/quake-atlas:latest
+docker run -d --name quake-atlas -p 8000:8000 -v quake-data:/data ghcr.io/andrewchampagne/quake-atlas:latest
 ```
 
 Open http://localhost:8000. On first start the container downloads the sample

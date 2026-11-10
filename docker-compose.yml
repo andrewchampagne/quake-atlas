@@ -8,7 +8,7 @@
 # then `docker compose down -v && docker compose up -d` to rebuild the data.
 services:
   quake-atlas:
-    image: ghcr.io/__OWNER__/quake-atlas:latest
+    image: ghcr.io/andrewchampagne/quake-atlas:latest
     build: .
     ports:
       - "8000:8000"
