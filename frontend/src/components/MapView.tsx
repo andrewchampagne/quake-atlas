@@ -10,6 +10,7 @@ import DeckGL from '@deck.gl/react';
 import { useEffect, useMemo, useState } from 'react';
 import { Map } from 'react-map-gl/maplibre';
 import { FILTER_SIZE } from '../lib/attributes';
+import { MAP_CONTROLLER } from '../lib/mapControls';
 import { maplibregl } from '../lib/maplibre';
 import { gpuFilterRange } from '../lib/filters';
 import { magnitudeToRadius, zoomRadiusScale } from '../lib/scales';
@@ -154,7 +155,7 @@ export function MapView() {
       views={VIEWS}
       viewState={viewState}
       onViewStateChange={({ viewState: next }) => setViewState(next as ViewState)}
-      controller={{ dragRotate: false, touchRotate: false, doubleClickZoom: true }}
+      controller={MAP_CONTROLLER}
       layers={layers}
       onHover={handleHover}
       onClick={handleClick}

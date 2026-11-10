@@ -6,8 +6,9 @@
  * filters, i.e. the new query asks for events outside what was loaded, or the
  * loaded set was downsampled (so narrowing could reveal events that were cut).
  */
-import type { Meta, ServerQuery } from '../api/types';
-import { yearStartMs } from './time';
+import { decodeDeathToll } from '../api/deaths';
+import type { EventColumns, Meta, ServerQuery, StrongestEvent, Summary, YearCount } from '../api/types';
+import { decimalYearToMs, yearOf, yearStartMs } from './time';
 
 export interface Filters {
   /** Inclusive astronomical years. */
@@ -94,6 +95,7 @@ function normalize(q: ServerQuery): ServerQuery {
     minDepth: q.minDepth,
     maxDepth: q.maxDepth,
     sources: q.sources ? [...q.sources].sort() : undefined,
+    deadlyOnly: q.deadlyOnly || undefined,
   };
 }
 
@@ -119,7 +121,8 @@ export function covers(loaded: ServerQuery, needed: ServerQuery): boolean {
     looserLow(loaded.minMag, needed.minMag) &&
     looserHigh(loaded.maxMag, needed.maxMag) &&
     depthOk &&
-    sourcesOk
+    sourcesOk &&
+    (!loaded.deadlyOnly || needed.deadlyOnly === true)
   );
 }
 
@@ -143,7 +146,92 @@ export function toSearchParams(q: ServerQuery): URLSearchParams {
   set('min_depth', q.minDepth);
   set('max_depth', q.maxDepth);
   q.sources?.forEach((s) => p.append('sources', s));
+  if (q.deadlyOnly) p.set('deadly_only', 'true');
   return p;
+}
+
+/**
+ * Summarize a complete loaded catalog for the active filters/window. Callers must
+ * check query coverage and downsampling before using these as catalog totals.
+ * Approximate NOAA ranges count as deadly events, never as exact deaths.
+ */
+export function summarizeEvents(
+  events: EventColumns,
+  filters: Filters,
+  meta: Meta,
+  playback: Playback,
+): Summary {
+  const [start, end] = visibleWindow(filters, playback).map(decimalYearToMs);
+  const sources = new Map(meta.sources.map((source) => [source.code, source.id]));
+  const enabled = new Set(meta.sources.filter((s) => filters.sources.includes(s.id)).map((s) => s.code));
+  const depthActive = isDepthActive(filters, meta);
+  const years = new Map<number, YearCount>();
+  let total = 0;
+  let totalDeaths = 0;
+  let deadly = 0;
+  let approximate = 0;
+  let strongest: StrongestEvent | null = null;
+  let deadliest: StrongestEvent | null = null;
+  let deadliestRank = -1;
+  const eventAt = (i: number): StrongestEvent => ({
+    rid: events.rid[i],
+    event_id: '',
+    time: events.time[i],
+    longitude: events.lon[i],
+    latitude: events.lat[i],
+    depth_km: Number.isNaN(events.depth[i]) ? null : events.depth[i],
+    magnitude: events.magnitude[i],
+    place: null,
+    source: sources.get(events.source[i]) ?? String(events.source[i]),
+    ...decodeDeathToll(events.deaths?.[i]),
+  });
+  for (let i = 0; i < events.length; i++) {
+    const magnitude = events.magnitude[i];
+    const depth = events.depth[i];
+    if (
+      events.time[i] < start || events.time[i] >= end ||
+      magnitude < filters.magRange[0] - 1e-6 || magnitude > filters.magRange[1] + 1e-6 ||
+      !enabled.has(events.source[i]) ||
+      (depthActive && (!Number.isFinite(depth) || depth < filters.depthRange[0] || depth > filters.depthRange[1]))
+    ) continue;
+
+    total++;
+    const { deaths, deaths_order: order } = decodeDeathToll(events.deaths?.[i]);
+    const year = yearOf(events.time[i]);
+    const annual = years.get(year) ?? { year, count: 0, deaths: events.deaths ? 0 : undefined };
+    annual.count++;
+    if (annual.deaths !== undefined) annual.deaths += deaths ?? 0;
+    years.set(year, annual);
+    totalDeaths += deaths ?? 0;
+    const isDeadly = (deaths ?? 0) > 0 || (order ?? 0) > 0;
+    if (isDeadly) deadly++;
+    if (deaths == null && (order ?? 0) > 0) approximate++;
+
+    const source = sources.get(events.source[i]);
+    if (!strongest || magnitude > strongest.magnitude ||
+      (magnitude === strongest.magnitude && (
+        (source !== 'noaa' && strongest.source === 'noaa') ||
+        ((source === 'noaa') === (strongest.source === 'noaa') &&
+          (events.time[i] < strongest.time || (events.time[i] === strongest.time && events.rid[i] < strongest.rid)))
+      ))) strongest = eventAt(i);
+
+    const rank = deaths ?? ([0, 1, 51, 101, 1001][order ?? 0] ?? 0);
+    if (isDeadly && (!deadliest || rank > deadliestRank ||
+      (rank === deadliestRank && (magnitude > deadliest.magnitude ||
+        (magnitude === deadliest.magnitude && events.rid[i] < deadliest.rid))))) {
+      deadliest = eventAt(i);
+      deadliestRank = rank;
+    }
+  }
+  return {
+    total,
+    strongest,
+    deadliest,
+    per_year: [...years.values()].sort((a, b) => a.year - b.year),
+    total_deaths: events.deaths ? totalDeaths : undefined,
+    deadly_events: events.deaths ? deadly : undefined,
+    approx_deadly_events: events.deaths ? approximate : undefined,
+  };
 }
 
 /** The time window currently shown, as fractional years `[start, end)`. */

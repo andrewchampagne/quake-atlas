@@ -23,9 +23,19 @@ export interface Meta {
   sources: SourceInfo[];
   total: number;
   max_points: number;
+  /** Optional for catalogs served by older backends. */
+  deadly_events?: number;
+  simulator_ready?: boolean;
 }
 
-export interface StrongestEvent {
+/** Missing fields are unknown (older catalogs); zero is an explicit recorded value. */
+export interface DeathToll {
+  deaths?: number | null;
+  /** NOAA: 0 none, 1 = 1–50, 2 = 51–100, 3 = 101–1,000, 4 = >1,000. */
+  deaths_order?: number | null;
+}
+
+export interface StrongestEvent extends DeathToll {
   rid: number;
   event_id: string;
   time: number;
@@ -40,15 +50,23 @@ export interface StrongestEvent {
 export interface YearCount {
   year: number;
   count: number;
+  /** Sum of exact recorded counts only. */
+  deaths?: number;
 }
 
 export interface Summary {
   total: number;
   strongest: StrongestEvent | null;
   per_year: YearCount[];
+  /** Sum of exact counts; approximate ranges and unknown tolls are excluded. */
+  total_deaths?: number;
+  /** Includes events with an exact positive count or a positive NOAA order. */
+  deadly_events?: number;
+  approx_deadly_events?: number;
+  deadliest?: StrongestEvent | null;
 }
 
-export interface EventDetail {
+export interface EventDetail extends DeathToll {
   rid: number;
   event_id: string;
   time: number;
@@ -62,6 +80,7 @@ export interface EventDetail {
   place: string | null;
   source: string;
   url: string | null;
+  deaths_label?: string;
 }
 
 /** Server-side filter parameters. `undefined` = unbounded. */
@@ -74,6 +93,7 @@ export interface ServerQuery {
   maxDepth?: number;
   /** `undefined` = all sources. */
   sources?: string[];
+  deadlyOnly?: boolean;
 }
 
 /** Columns decoded from the Arrow payload (zero-copy typed arrays where possible). */
@@ -88,6 +108,8 @@ export interface EventColumns {
   depth: Float32Array;
   magnitude: Float32Array;
   source: Uint8Array;
+  /** Exact count >= 0; -1..-4 = NOAA order; NaN = unknown. Absent in legacy data. */
+  deaths?: Float32Array;
 }
 
 export interface EventsMeta {

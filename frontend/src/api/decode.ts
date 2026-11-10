@@ -26,6 +26,10 @@ export function decodeEvents(buffer: ArrayBuffer | Uint8Array): EventColumns {
     depth: column(table, 'depth_km', Float32Array),
     magnitude: column(table, 'magnitude', Float32Array),
     source: column(table, 'source', Uint8Array),
+    // Older servers omit this column. A zero-filled fallback would invent recorded zero tolls.
+    deaths: table.getChild('deaths')
+      ? column(table, 'deaths', Float32Array)
+      : new Float32Array(table.numRows).fill(Number.NaN),
   };
 }
 

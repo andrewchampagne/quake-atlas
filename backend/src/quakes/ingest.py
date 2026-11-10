@@ -30,7 +30,7 @@ from pathlib import Path
 
 import httpx
 
-from quakes.config import USER_AGENT
+from quakes.config import COUNTRIES_FILE, NATURAL_EARTH_BASE, PLACES_FILE, USER_AGENT
 
 log = logging.getLogger(__name__)
 
@@ -293,6 +293,42 @@ def _remove_superseded(ydir: Path, keep: set[str]) -> None:
             stale.unlink()
 
 
+# --------------------------------------------------------------------------- Natural Earth
+
+
+def places_dir(raw_dir: Path) -> Path:
+    return raw_dir / "places"
+
+
+def ingest_places(
+    raw_dir: Path,
+    *,
+    client: httpx.Client | None = None,
+    policy: RetryPolicy | None = None,
+    force: bool = False,
+) -> IngestStats:
+    """Download Natural Earth populated places and countries (used for exposure). Resumable."""
+    policy = policy or RetryPolicy()
+    stats = IngestStats()
+    own_client = client is None
+    client = client or make_client()
+    try:
+        for name in (PLACES_FILE, COUNTRIES_FILE):
+            path = places_dir(raw_dir) / name
+            if path.exists() and not force:
+                stats.chunks_skipped += 1
+                continue
+            resp = get_with_retry(client, NATURAL_EARTH_BASE + name, {}, policy, stats)
+            _atomic_write(path, resp.content)
+            stats.chunks_downloaded += 1
+            stats.files.append(path)
+            log.info("Natural Earth: %s (%.1f MB)", name, len(resp.content) / 1e6)
+    finally:
+        if own_client:
+            client.close()
+    return stats
+
+
 # --------------------------------------------------------------------------- NOAA
 
 
@@ -304,12 +340,17 @@ def ingest_noaa(
     raw_dir: Path,
     *,
     min_year: int = -2150,
-    max_year: int = 1899,
+    max_year: int | None = None,
     client: httpx.Client | None = None,
     policy: RetryPolicy | None = None,
     force: bool = False,
 ) -> IngestStats:
-    """Download the NOAA Significant Earthquake Database between two years. Resumable."""
+    """Download the NOAA Significant Earthquake Database between two years. Resumable.
+
+    The default range runs to the current year: records before 1900 become map
+    events, later ones supply death tolls for matching USGS events.
+    """
+    max_year = max_year if max_year is not None else datetime.now(UTC).year
     policy = policy or RetryPolicy()
     stats = IngestStats()
     own_client = client is None

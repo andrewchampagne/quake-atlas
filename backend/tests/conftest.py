@@ -44,6 +44,20 @@ EVENTS = [
 ]
 
 
+#: event_id -> (deaths, deaths_order). us6 has only an approximate NOAA order (101-1000).
+DEATHS: dict[str, tuple[int | None, int | None]] = {
+    "noaa-1": (20_000, 4),
+    "noaa-2": (60_000, 4),
+    "us1": (None, None),
+    "us2": (5, 1),
+    "us3": (227_898, 4),
+    "us4": (18_428, 4),
+    "us5": (None, None),
+    "us6": (None, 3),
+    "us7": (None, None),
+}
+
+
 @pytest.fixture
 def events_frame() -> pd.DataFrame:
     df = pd.DataFrame(
@@ -61,6 +75,8 @@ def events_frame() -> pd.DataFrame:
         ],
     )
     df["depth_km"] = df["depth_km"].astype("float64")
+    df["deaths"] = pd.array([DEATHS[e][0] for e in df["event_id"]], dtype="Int64")
+    df["deaths_order"] = pd.array([DEATHS[e][1] for e in df["event_id"]], dtype="Int64")
     return finalize(df)
 
 

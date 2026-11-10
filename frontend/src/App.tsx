@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import SimulatorView from './simulator/SimulatorView';
 import { FilterSidebar } from './components/FilterSidebar';
 import { HoverTooltip } from './components/HoverTooltip';
 import { Legend } from './components/Legend';
@@ -25,7 +26,7 @@ function useElementHeight<T extends HTMLElement>(fallback: number) {
   return [ref, height] as const;
 }
 
-export default function App() {
+function ExploreView() {
   useDataSync();
   usePlayback();
   useKeyboardShortcuts();
@@ -49,7 +50,7 @@ export default function App() {
           <FilterSidebar />
 
           {/* Right column: summary shrinks (and scrolls) so the legend always fits above the time bar. */}
-          <div className="pointer-events-none fixed top-3 right-3 z-10 flex max-h-[calc(100%-var(--timebar-h)-2.25rem)] w-[min(20rem,calc(100vw-8.5rem))] flex-col items-end gap-2 lg:w-80">
+          <div className="pointer-events-none fixed top-[4.5rem] right-3 z-10 flex max-h-[calc(100dvh-var(--timebar-h)-6rem)] w-[min(20rem,calc(100vw-8.5rem))] flex-col items-end gap-2 lg:w-80">
             <SummaryPanel />
             <div className="pointer-events-auto shrink-0">
               <Legend />
@@ -69,6 +70,28 @@ export default function App() {
       <HoverTooltip />
       <ErrorToast />
       <StartupOverlay />
+    </div>
+  );
+}
+
+
+export default function App() {
+  const [mode, setMode] = useState<'explore' | 'simulate'>('explore');
+  return (
+    <div className="flex h-full flex-col">
+      <header className="z-40 flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel-solid px-4 py-2">
+        <span className="text-sm font-semibold tracking-tight">Quake Atlas</span>
+        <nav aria-label="App features" className="flex gap-1 rounded-lg bg-raised p-1">
+          {(['explore', 'simulate'] as const).map((item) => (
+            <button key={item} type="button" aria-pressed={mode === item}
+              className={`rounded-md px-3 py-1.5 text-sm ${mode === item ? 'bg-accent text-white' : 'text-ink-2 hover:text-ink'}`}
+              onClick={() => { useQuakeStore.setState((s) => ({ playback: { ...s.playback, playing: false } })); setMode(item); }}>
+              {item === 'explore' ? 'Explore history' : 'Simulator'}
+            </button>
+          ))}
+        </nav>
+      </header>
+      <div className="relative min-h-0 flex-1">{mode === 'explore' ? <ExploreView /> : <SimulatorView />}</div>
     </div>
   );
 }

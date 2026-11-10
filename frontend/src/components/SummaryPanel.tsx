@@ -1,15 +1,21 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { formatDeathToll } from '../api/deaths';
+import type { StrongestEvent } from '../api/types';
+import { covers, summarizeEvents, toServerQuery } from '../lib/filters';
 import { formatCount, formatDepth, formatMagnitude } from '../lib/format';
 import { formatDate } from '../lib/time';
 import { useQuakeStore } from '../store/useQuakeStore';
 import { YearChart } from './YearChart';
 
-/** Total, strongest event and per-year chart for the current filters. */
+/** Catalog totals, recorded deaths and notable events for the current filters/window. */
 export function SummaryPanel() {
-  const summary = useQuakeStore((s) => s.summary);
+  const serverSummary = useQuakeStore((s) => s.summary);
   const summaryStatus = useQuakeStore((s) => s.summaryStatus);
   const summaryError = useQuakeStore((s) => s.summaryError);
   const filters = useQuakeStore((s) => s.filters);
+  const meta = useQuakeStore((s) => s.meta);
+  const events = useQuakeStore((s) => s.events);
+  const playback = useQuakeStore((s) => s.playback);
   const downsampled = useQuakeStore((s) => s.events?.downsampled ?? false);
   const returned = useQuakeStore((s) => s.events?.returned ?? 0);
   const loadedTotal = useQuakeStore((s) => s.events?.total ?? 0);
@@ -18,10 +24,22 @@ export function SummaryPanel() {
   const pin = useQuakeStore((s) => s.pin);
   const retry = useQuakeStore((s) => s.retry);
   const [open, setOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 1024);
+  const localSummary = useMemo(() => {
+    if (!events || !filters || !meta || events.downsampled ||
+      !covers(events.query, toServerQuery(filters, meta))) return null;
+    return summarizeEvents(events, filters, meta, playback);
+  }, [events, filters, meta, playback]);
+  const summary = localSummary ?? serverSummary;
 
   if (!filters) return null;
-  const refreshing = summaryStatus === 'loading' && summary !== null;
-  const strongest = summary?.strongest ?? null;
+  const refreshing = !localSummary && summaryStatus === 'loading' && summary !== null;
+  const withDetails = (event: StrongestEvent | null) => {
+    if (!event) return null;
+    const known = [serverSummary?.strongest, serverSummary?.deadliest].find((s) => s?.rid === event.rid);
+    return known ? { ...event, event_id: known.event_id, place: known.place } : event;
+  };
+  const strongest = withDetails(summary?.strongest ?? null);
+  const deadliest = withDetails(summary?.deadliest ?? null);
   const noSources = filters.sources.length === 0;
   const total = noSources ? 0 : summary?.total;
 
@@ -32,7 +50,9 @@ export function SummaryPanel() {
     >
       <header className="flex items-start justify-between gap-2 px-4 pt-3 pb-2">
         <div className={refreshing ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">Matching earthquakes</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">
+            {localSummary && playback.windowEnabled ? 'Earthquakes in time window' : 'Matching earthquakes'}
+          </div>
           <div className="text-3xl leading-tight font-semibold tracking-tight">
             {total == null ? '—' : formatCount(total)}
           </div>
@@ -48,8 +68,7 @@ export function SummaryPanel() {
         </button>
       </header>
 
-      {open && (
-        <div id="summary-body" className="flex-1 space-y-3 overflow-y-auto px-4 pb-4">
+      <div id="summary-body" className={`${open ? "block" : "hidden"} min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4 lg:block`}>
           {summaryError && (
             <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-ink">
               Couldn't load the summary: {summaryError}{' '}
@@ -58,6 +77,32 @@ export function SummaryPanel() {
               </button>
             </div>
           )}
+
+          <div className={refreshing ? 'space-y-1 opacity-60' : 'space-y-1'}>
+            <dl className="grid grid-cols-2 gap-2 rounded-lg border border-line p-2.5 text-xs">
+              <div>
+                <dt className="text-ink-3">Recorded deaths (exact counts)</dt>
+                <dd className="tnum mt-1 text-xl font-semibold text-ink">
+                  {noSources ? '0' : summary?.total_deaths == null ? '—' : formatCount(summary.total_deaths)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-ink-3">Events with recorded deaths</dt>
+                <dd className="tnum mt-1 text-xl font-semibold text-ink">
+                  {noSources ? '0' : summary?.deadly_events == null ? '—' : formatCount(summary.deadly_events)}
+                </dd>
+              </div>
+            </dl>
+            <p className="text-[10px] leading-snug text-ink-3">
+              Exact totals exclude unknown tolls and approximate ranges. Missing reports do not mean zero deaths.
+              {!noSources && summary?.approx_deadly_events != null && summary.approx_deadly_events > 0 && (
+                <> {formatCount(summary.approx_deadly_events)} events have approximate ranges only.</>
+              )}
+            </p>
+            {playback.windowEnabled && !localSummary && (
+              <p className="text-[10px] text-ink-3">Statistics cover the full filter period, including events outside the time window.</p>
+            )}
+          </div>
 
           {downsampled && !noSources && (
             <div className="flex gap-2 rounded-md border border-warn/40 bg-warn/10 p-2 text-xs leading-snug text-ink">
@@ -73,16 +118,20 @@ export function SummaryPanel() {
             </div>
           )}
 
-          {strongest && !noSources && (
+          {!noSources && [
+            { title: 'Strongest event', event: strongest, deathFirst: false },
+            { title: 'Deadliest recorded event', event: deadliest, deathFirst: true },
+          ].map(({ title, event, deathFirst }) => event && (
             <button
+              key={title}
               type="button"
               onClick={() => {
-                flyTo(strongest.longitude, strongest.latitude, 4.5);
+                flyTo(event.longitude, event.latitude, 4.5);
                 pin({
-                  rid: strongest.rid,
-                  longitude: strongest.longitude,
-                  latitude: strongest.latitude,
-                  magnitude: strongest.magnitude,
+                  rid: event.rid,
+                  longitude: event.longitude,
+                  latitude: event.latitude,
+                  magnitude: event.magnitude,
                 });
               }}
               className={`group block w-full rounded-lg border border-line bg-raised/60 p-2.5 text-left hover:border-line-strong ${
@@ -90,22 +139,27 @@ export function SummaryPanel() {
               }`}
             >
               <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-ink-3">
-                Strongest event
+                {title}
                 <span className="font-normal normal-case tracking-normal text-accent opacity-80 group-hover:opacity-100">
                   Fly to it →
                 </span>
               </div>
-              <div className="mt-1 text-lg font-semibold">{formatMagnitude(strongest.magnitude)}</div>
-              <div className="text-sm text-ink">{strongest.place ?? 'Unnamed location'}</div>
+              <div className="mt-1 text-lg font-semibold">
+                {deathFirst ? `${formatDeathToll(event)} deaths` : formatMagnitude(event.magnitude)}
+              </div>
+              <div className="text-sm text-ink">{event.place ?? (event.event_id ? 'Unnamed location' : 'Pin for location details')}</div>
               <div className="text-xs text-ink-2">
-                {formatDate(strongest.time, strongest.source !== 'noaa')} · {formatDepth(strongest.depth_km)}
+                {formatDate(event.time, event.source !== 'noaa')} · {formatDepth(event.depth_km)}
+              </div>
+              <div className="mt-1 text-xs text-ink-2">
+                {deathFirst ? formatMagnitude(event.magnitude) : `Recorded deaths: ${formatDeathToll(event)}`}
               </div>
             </button>
-          )}
+          ))}
 
           {summary && !noSources && (
             <YearChart
-              perYear={summary.per_year}
+              perYear={serverSummary?.per_year ?? summary.per_year}
               startYear={filters.yearRange[0]}
               endYear={filters.yearRange[1]}
               dimmed={refreshing}
@@ -116,8 +170,7 @@ export function SummaryPanel() {
           {summary?.total === 0 && !noSources && (
             <p className="text-xs text-ink-2">No earthquakes match these filters. Try widening them.</p>
           )}
-        </div>
-      )}
+      </div>
     </section>
   );
 }

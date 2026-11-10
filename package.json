@@ -11,7 +11,8 @@
     "build": "npm --prefix frontend run build",
     "start": "npm run build && cd backend && uv run uvicorn quakes.api:app --host 127.0.0.1 --port 8000",
     "test": "cd backend && uv run pytest && cd .. && npm --prefix frontend test",
-    "lint": "cd backend && uv run ruff check . && uv run ruff format --check . && cd .. && npm --prefix frontend run lint"
+    "lint": "cd backend && uv run ruff check . && uv run ruff format --check . && cd .. && npm --prefix frontend run lint",
+    "prepare-simulator": "cd backend && uv run quakes prepare-simulator"
   },
   "devDependencies": {
     "concurrently": "^10.0.7"

@@ -30,7 +30,7 @@ export function useDataSync(): void {
   const debounced = useDebouncedValue(filters, FILTER_DEBOUNCE_MS);
 
   useEffect(() => {
-    void loadMeta();
+    if (!useQuakeStore.getState().meta) void loadMeta();
   }, [loadMeta]);
 
   useEffect(() => {

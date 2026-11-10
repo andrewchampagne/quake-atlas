@@ -83,7 +83,7 @@ def test_summary(client: TestClient) -> None:
     body = client.get("/api/summary", params={"min_mag": 6}).json()
     assert body["total"] == 5
     assert body["strongest"]["event_id"] == "us3"
-    assert body["per_year"][0] == {"year": -463, "count": 1}
+    assert body["per_year"][0] == {"year": -463, "count": 1, "deaths": 20000}
 
 
 def test_meta(client: TestClient) -> None:
@@ -117,3 +117,40 @@ def test_serves_built_frontend(make_client: Callable[..., TestClient], tmp_path:
     client = make_client(frontend_dist=dist)
     assert "quakes" in client.get("/").text
     assert client.get("/api/meta").status_code == 200
+
+
+def test_simulator_rejects_out_of_domain_inputs(client: TestClient) -> None:
+    base = {"latitude": 35, "longitude": 140, "magnitude": 7, "depth_km": 10}
+    for key, invalid in (("latitude", 91), ("longitude", 181), ("magnitude", 9), ("depth_km", 0)):
+        assert client.post("/api/simulate", json={**base, key: invalid}).status_code == 422
+
+
+def test_simulator_missing_assets_explains_setup(client: TestClient) -> None:
+    response = client.post(
+        "/api/simulate",
+        json={
+            "latitude": 35,
+            "longitude": 140,
+            "magnitude": 7,
+            "depth_km": 10,
+        },
+    )
+    assert response.status_code == 503
+    assert "prepare-simulator" in response.json()["detail"]
+
+
+def test_geocode_endpoint_validates_and_searches(client: TestClient, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from quakes.geocode import Geocoder, PlaceResult
+
+    monkeypatch.setattr(
+        Geocoder,
+        "search",
+        lambda self, q, limit=6: [
+            PlaceResult(
+                name="Lima", label="Lima, Peru", latitude=-12, longitude=-77, source="local"
+            )
+        ],
+    )
+    assert client.get("/api/geocode?q=l").status_code == 422
+    body = client.get("/api/geocode?q=lima").json()
+    assert body[0]["label"] == "Lima, Peru" and body[0]["latitude"] == -12

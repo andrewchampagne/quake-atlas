@@ -1,3 +1,4 @@
+import { decodeDeathToll, formatDeathToll } from '../api/deaths';
 import { formatDepth, formatMagnitude } from '../lib/format';
 import { depthToRgb } from '../lib/scales';
 import { formatDate } from '../lib/time';
@@ -23,7 +24,7 @@ export function HoverTooltip() {
   const depth = events.depth[i];
   const [r, g, b] = depthToRgb(depth);
   const left = Math.min(hover.x + OFFSET, window.innerWidth - WIDTH - 8);
-  const top = Math.min(hover.y + OFFSET, window.innerHeight - 140);
+  const top = Math.min(hover.y + OFFSET, window.innerHeight - 164);
 
   return (
     <div
@@ -38,6 +39,9 @@ export function HoverTooltip() {
       <div className="mt-1 flex items-center gap-1.5 text-ink-2">
         <span className="inline-block h-0.5 w-3 rounded" style={{ background: `rgb(${r},${g},${b})` }} />
         {formatDepth(depth)}
+      </div>
+      <div className="mt-1 text-ink-2">
+        Recorded deaths: <span className="tnum text-ink">{formatDeathToll(detail ?? decodeDeathToll(events.deaths?.[i]))}</span>
       </div>
       <div className="mt-1 min-h-4 truncate text-ink">
         {detail ? (detail.place ?? 'Unnamed location') : <span className="text-ink-3">Loading place…</span>}

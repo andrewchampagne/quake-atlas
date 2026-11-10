@@ -8,7 +8,7 @@ An interactive dark-themed world map of earthquakes from 2150 BCE to today.
 | Source | Coverage | Used for |
 |---|---|---|
 | [USGS ComCat](https://earthquake.usgs.gov/fdsnws/event/1/) (FDSN event service) | 1900 to present, instrumental | Events from 1900 onward |
-| [NOAA NCEI Significant Earthquake Database](https://www.ngdc.noaa.gov/hazel/view/hazards/earthquake/search) | 2150 BCE to present, damaging events only | Events before 1900 |
+| [NOAA NCEI Significant Earthquake Database](https://www.ngdc.noaa.gov/hazel/view/hazards/earthquake/search) | 2150 BCE to present, damaging events only | Events before 1900; modern impact reports enrich USGS |
 
 ```
 USGS FDSN ─┐  ingest.py    data/raw/   clean.py    earthquakes.parquet   query.py   api.py
@@ -30,7 +30,7 @@ make setup     # or: npm run setup
 ```
 
 ```bash
-make sample    # USGS M5+ 2000-2024 + NOAA pre-1900 (~45k events, about a minute)
+make sample    # USGS M5+ 2000-2024 + NOAA events and impact reports (~45k map events, about a minute)
 ```
 
 ```bash
@@ -219,3 +219,45 @@ data/              raw/ and processed/ (gitignored)
 ```
 
 Basemap © [CARTO](https://carto.com/attributions), © OpenStreetMap contributors.
+## Simulator and historical deaths
+
+Use the **Explore history / Simulator** tabs to switch features. In Simulator,
+click the map or enter coordinates, set magnitude and depth, then run a scenario.
+Supported inputs are M5.0–7.9 and depths 1–70 km. It estimates effects of a
+hypothetical earthquake; it does not forecast earthquake occurrence.
+
+To enrich an existing sample and prepare the model:
+
+```sh
+cd backend
+uv run quakes ingest-noaa
+uv run quakes clean
+uv run quakes prepare-simulator
+```
+
+Restart the API after rebuilding data or training. Generated assets stay under
+the ignored `data/` directory. Root command `npm run prepare-simulator` runs the
+last step. Sample and full ingestion now also fetch modern NOAA impact reports.
+
+Historical deaths come from [NOAA NCEI](https://www.ngdc.noaa.gov/hazel/view/hazards/earthquake/search).
+Modern reports enrich matching USGS events using time, distance and magnitude;
+pre-1900 NOAA events retain their own counts. Missing counts remain unknown.
+Approximate tolls display as ranges and are excluded from exact-count sums.
+Totals include secondary hazards where NOAA supplies a total; they are incomplete
+historical records, not comprehensive worldwide death totals.
+
+Shaking uses the [Allen, Wald & Worden intensity equation](https://docs.openquake.org/oq-engine/master/manual/_modules/openquake/hazardlib/gsim/allen_2012_ipe.html).
+Exposure uses [Natural Earth cities](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-populated-places/).
+These city populations omit rural areas, may overlap metropolitan populations,
+and use modern estimates for historical training events. The trained fatality
+model is conditional on reported historical impacts: missing reports are never
+treated as zero. Selection bias, incomplete labels, building vulnerability,
+tsunamis and local soil effects prevent calibrated forecasts. Treat its broad
+fatality ranges as exploratory comparisons, not emergency-planning estimates.
+Each result includes sample size, held-out metrics and model limitations.
+
+`POST /api/simulate` accepts `{latitude, longitude, magnitude, depth_km}` and
+returns shaking rings, city exposure, fatality bins, historical analogs and model
+metadata. Out-of-domain inputs return 422; missing model assets return 503.
+The Arrow events payload adds `deaths`: NaN unknown, nonnegative exact count,
+or negative -1 through -4 for NOAA ordinal categories.

@@ -55,7 +55,7 @@ def _clean(_args: argparse.Namespace, settings: Settings) -> None:
 
 def _sample(args: argparse.Namespace, settings: Settings) -> None:
     args.start_year, args.end_year, args.min_mag = 2000, 2024, 5.0
-    args.min_year, args.max_year, args.force = -2150, 1899, False
+    args.min_year, args.max_year, args.force = -2150, datetime.now(UTC).year, False
     _ingest_usgs(args, settings)
     _ingest_noaa(args, settings)
     _clean(args, settings)
@@ -63,10 +63,16 @@ def _sample(args: argparse.Namespace, settings: Settings) -> None:
 
 def _full(args: argparse.Namespace, settings: Settings) -> None:
     args.start_year, args.end_year = 1900, datetime.now(UTC).year
-    args.min_year, args.max_year, args.force = -2150, 1899, False
+    args.min_year, args.max_year, args.force = -2150, datetime.now(UTC).year, False
     _ingest_usgs(args, settings)
     _ingest_noaa(args, settings)
     _clean(args, settings)
+
+
+def _prepare_simulator(_args: argparse.Namespace, settings: Settings) -> None:
+    from quakes.simulator import prepare
+
+    prepare(settings)
 
 
 def _serve(args: argparse.Namespace, _settings: Settings) -> None:
@@ -94,11 +100,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     noaa = sub.add_parser("ingest-noaa", help="download NOAA significant earthquakes")
     noaa.add_argument("--min-year", type=int, default=-2150)
-    noaa.add_argument("--max-year", type=int, default=1899)
+    noaa.add_argument("--max-year", type=int, default=datetime.now(UTC).year)
     noaa.add_argument("--force", action="store_true", help="re-download cached pages")
     noaa.set_defaults(func=_ingest_noaa)
 
     sub.add_parser("clean", help="rebuild the processed Parquet file").set_defaults(func=_clean)
+
+    sub.add_parser(
+        "prepare-simulator", help="download exposure data and train the scenario model"
+    ).set_defaults(func=_prepare_simulator)
 
     serve = sub.add_parser("serve", help="run the API")
     serve.add_argument("--host", default="127.0.0.1")

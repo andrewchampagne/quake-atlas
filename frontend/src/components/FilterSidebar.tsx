@@ -253,7 +253,7 @@ export function FilterSidebar() {
       <aside
         id="filter-sidebar"
         aria-label="Filters"
-        className={`panel fixed top-3 bottom-3 left-3 z-30 flex w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-hidden transition-transform duration-200 ${
+        className={`panel fixed top-[4.5rem] bottom-3 left-3 z-30 flex w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-hidden transition-transform duration-200 ${
           open ? 'translate-x-0' : '-translate-x-[110%]'
         }`}
       >
@@ -283,7 +283,7 @@ export function FilterSidebar() {
           onClick={() => setOpen(true)}
           aria-controls="filter-sidebar"
           aria-expanded={open}
-          className="panel fixed top-3 left-3 z-30 px-3 py-2 text-sm text-ink hover:border-line-strong"
+          className="panel fixed top-[4.5rem] left-3 z-30 px-3 py-2 text-sm text-ink hover:border-line-strong"
         >
           ☰ Filters
         </button>

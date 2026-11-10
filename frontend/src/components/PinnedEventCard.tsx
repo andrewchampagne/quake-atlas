@@ -1,3 +1,5 @@
+import { useMemo } from 'react';
+import { decodeDeathToll, formatDeathToll } from '../api/deaths';
 import { formatDepth, formatLatLon, formatMagnitude } from '../lib/format';
 import { useQuakeStore } from '../store/useQuakeStore';
 import { useEventDetail } from './useEventDetail';
@@ -12,7 +14,12 @@ export function PinnedEventCard() {
   const pinned = useQuakeStore((s) => s.pinned);
   const pin = useQuakeStore((s) => s.pin);
   const flyTo = useQuakeStore((s) => s.flyTo);
+  const events = useQuakeStore((s) => s.events);
   const detail = useEventDetail(pinned?.rid ?? null);
+  const loadedToll = useMemo(() => {
+    const index = pinned && events ? events.rid.indexOf(pinned.rid) : -1;
+    return index >= 0 ? decodeDeathToll(events?.deaths?.[index]) : {};
+  }, [events, pinned]);
   if (!pinned) return null;
 
   return (
@@ -32,6 +39,9 @@ export function PinnedEventCard() {
         >
           ✕
         </button>
+      </div>
+      <div className="mt-2 text-xs text-ink-2">
+        Recorded deaths: <span className="tnum text-ink">{formatDeathToll(detail ?? loadedToll)}</span>
       </div>
       {detail ? (
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">

@@ -21,6 +21,13 @@ SOURCE_CUTOFF_MS = -2_208_988_800_000
 
 USER_AGENT = "quakes-explorer/0.1"
 
+#: Natural Earth (public domain): city populations and country income groups for exposure.
+NATURAL_EARTH_BASE = (
+    "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/"
+)
+PLACES_FILE = "ne_10m_populated_places_simple.geojson"
+COUNTRIES_FILE = "ne_110m_admin_0_countries.geojson"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -41,6 +48,14 @@ class Settings:
     @property
     def parquet_path(self) -> Path:
         return self.processed_dir / "earthquakes.parquet"
+
+    @property
+    def places_path(self) -> Path:
+        return self.processed_dir / "places.parquet"
+
+    @property
+    def model_path(self) -> Path:
+        return self.processed_dir / "fatality_model.joblib"
 
     @classmethod
     def from_env(cls) -> Settings:

@@ -31,7 +31,8 @@ from fastapi.staticfiles import StaticFiles
 
 from quakes.cache import LRUCache
 from quakes.config import Settings
-from quakes.models import EventDetail, Meta, Summary
+from quakes.geocode import Geocoder, PlaceResult
+from quakes.models import EventDetail, Meta, Simulation, SimulationInput, Summary
 from quakes.query import Filters, QuakeStore
 
 log = logging.getLogger(__name__)
@@ -68,6 +69,8 @@ class AppState:
     def __init__(self, settings: Settings, store: QuakeStore | None) -> None:
         self.settings = settings
         self.store = store
+        self.simulator = None
+        self.geocoder: Geocoder | None = None
         self.payload_cache: LRUCache[Filters, EventsPayload] = LRUCache(
             max_items=64, max_bytes=512 * 1024 * 1024, sizeof=lambda p: p.nbytes
         )
@@ -147,7 +150,7 @@ def create_app(settings: Settings | None = None, store: QuakeStore | None = None
     app.add_middleware(
         CORSMiddleware,
         allow_origins=DEV_ORIGINS,
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
         allow_headers=["*"],
         expose_headers=EXPOSED_HEADERS,
     )
@@ -202,7 +205,31 @@ def create_app(settings: Settings | None = None, store: QuakeStore | None = None
     @app.get("/api/meta", response_model=Meta)
     def meta(store: StoreDep) -> Meta:
         """Dataset bounds (time, magnitude, depth) and available sources."""
-        return store.meta(settings.max_points)
+        return store.meta(settings.max_points, simulator_ready=settings.model_path.exists())
+
+    @app.post("/api/simulate", response_model=Simulation)
+    def simulate(scenario: SimulationInput, store: StoreDep) -> Simulation:
+        from quakes.simulator import Simulator
+
+        if state.simulator is None:
+            try:
+                state.simulator = Simulator.load(settings)
+            except FileNotFoundError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Simulator data unavailable. Run uv run quakes prepare-simulator.",
+                ) from exc
+        return state.simulator.simulate(scenario, store)
+
+    @app.get("/api/geocode", response_model=list[PlaceResult])
+    def geocode(
+        q: Annotated[str, Query(min_length=2, max_length=100, description="Place to search for")],
+        limit: Annotated[int, Query(ge=1, le=10)] = 6,
+    ) -> list[PlaceResult]:
+        """Search places by name (Photon / OpenStreetMap, falling back to bundled cities)."""
+        if state.geocoder is None:
+            state.geocoder = Geocoder(settings.places_path)
+        return state.geocoder.search(q, limit)
 
     if settings.frontend_dist.is_dir():
         app.mount("/", StaticFiles(directory=settings.frontend_dist, html=True), name="frontend")

@@ -201,12 +201,12 @@ def test_ingest_noaa_paginates_and_resumes(tmp_path: Path) -> None:
             200, json={"items": items, "page": page, "totalPages": 3, "totalItems": 6}
         )
 
-    stats = ingest.ingest_noaa(tmp_path, client=_client(hazel), policy=_no_sleep())
+    stats = ingest.ingest_noaa(tmp_path, max_year=1899, client=_client(hazel), policy=_no_sleep())
     assert pages == [1, 2, 3] and stats.events_expected == 6
     out = ingest.noaa_dir(tmp_path, -2150, 1899)
     assert json.loads((out / "page_0002.json").read_text())["items"][0]["id"] == 20
 
     (out / "page_0003.json").unlink()
     pages.clear()
-    stats = ingest.ingest_noaa(tmp_path, client=_client(hazel), policy=_no_sleep())
+    stats = ingest.ingest_noaa(tmp_path, max_year=1899, client=_client(hazel), policy=_no_sleep())
     assert pages == [3] and stats.chunks_skipped == 2

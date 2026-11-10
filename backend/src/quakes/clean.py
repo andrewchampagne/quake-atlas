@@ -16,7 +16,15 @@ magnitude   float32
 mag_type    string                 nullable
 place       string                 nullable
 source      string                 ``usgs`` | ``noaa``
+deaths      int32                  nullable; total deaths (incl. tsunami etc.)
+deaths_order int8                  nullable; NOAA order: 0 none, 1 = 1-50,
+                                   2 = 51-100, 3 = 101-1000, 4 = over 1000
 ==========  =====================  ==========================================
+
+Death tolls come from NOAA. Records before 1900 are events in their own right;
+later NOAA records are matched to the USGS event they describe (close in time
+and space) and only contribute ``deaths`` / ``deaths_order``. USGS events with
+no matching NOAA record have null deaths. Missing reports are unknown, never zero.
 
 Internally time is carried as ``time_ms`` (int64 epoch milliseconds) because
 neither :mod:`datetime` nor nanosecond pandas timestamps can hold BCE dates.
@@ -49,6 +57,8 @@ COLUMNS = [
     "mag_type",
     "place",
     "source",
+    "deaths",
+    "deaths_order",
 ]
 KEY_FIELDS = ["time_ms", "latitude", "longitude", "magnitude"]
 
@@ -65,6 +75,8 @@ PARQUET_SCHEMA = pa.schema(
         pa.field("mag_type", pa.string()),
         pa.field("place", pa.string()),
         pa.field("source", pa.string(), nullable=False),
+        pa.field("deaths", pa.int32()),
+        pa.field("deaths_order", pa.int8()),
     ]
 )
 
@@ -89,6 +101,9 @@ class CleanReport:
     after_validation: int
     after_dedup: int
     output_path: Path
+    impacts: int = 0
+    impacts_matched: int = 0
+    deadly_events: int = 0
 
 
 def _empty() -> pd.DataFrame:
@@ -157,6 +172,8 @@ def normalize_usgs(raw: pd.DataFrame) -> pd.DataFrame:
             "mag_type": _string(df, "magType"),
             "place": _string(df, "place"),
             "source": "usgs",
+            "deaths": pd.Series(pd.NA, index=df.index, dtype="Int64"),
+            "deaths_order": pd.Series(pd.NA, index=df.index, dtype="Int64"),
         }
     )
 
@@ -181,6 +198,20 @@ def _noaa_mag_type(df: pd.DataFrame, magnitude: pd.Series) -> pd.Series:
     return mag_type
 
 
+def deaths_to_order(deaths: pd.Series) -> pd.Series:
+    """NOAA's ordinal death scale for a count: 0, 1-50, 51-100, 101-1000, >1000."""
+    order = pd.cut(deaths, bins=[-1, 0, 50, 100, 1000, np.inf], labels=False)
+    return pd.Series(order, index=deaths.index).astype("Int64")
+
+
+def _first_present(df: pd.DataFrame, *columns: str) -> pd.Series:
+    """Element-wise first non-null value among ``columns``."""
+    out = _numeric(df, columns[0])
+    for column in columns[1:]:
+        out = out.fillna(_numeric(df, column))
+    return out
+
+
 def noaa_to_astronomical(year: pd.Series) -> pd.Series:
     """NOAA counts BCE years as negative with no year zero (-1 = 1 BCE).
 
@@ -192,7 +223,10 @@ def noaa_to_astronomical(year: pd.Series) -> pd.Series:
 def normalize_noaa(raw: pd.DataFrame) -> pd.DataFrame:
     """Map NOAA Hazel JSON fields onto the common schema.
 
-    Missing month/day/time parts default to January 1st, 00:00 UTC.
+    Missing month/day/time parts default to January 1st, 00:00 UTC. Death tolls
+    prefer the totals (which include tsunami and other secondary deaths). The
+    extra boolean column ``time_known`` records whether the hour was given; it
+    is used for matching and is not written to Parquet.
     """
     if raw.empty:
         return _empty()
@@ -210,6 +244,9 @@ def normalize_noaa(raw: pd.DataFrame) -> pd.DataFrame:
         dtype="Int64",
     ).where(valid_year)
     magnitude = _numeric(df, "eqMagnitude")
+    deaths = _first_present(df, "deathsTotal", "deaths").round().astype("Int64")
+    order = _first_present(df, "deathsAmountOrderTotal", "deathsAmountOrder").astype("Int64")
+    order = order.fillna(deaths_to_order(deaths.astype("float64")))
     return pd.DataFrame(
         {
             "event_id": "noaa-" + _numeric(df, "id").astype("Int64").astype("string"),
@@ -221,6 +258,9 @@ def normalize_noaa(raw: pd.DataFrame) -> pd.DataFrame:
             "mag_type": _noaa_mag_type(df, magnitude),
             "place": _noaa_place(df),
             "source": "noaa",
+            "deaths": deaths,
+            "deaths_order": order,
+            "time_known": _numeric(df, "hour").notna(),
         }
     )
 
@@ -292,6 +332,93 @@ def deduplicate(df: pd.DataFrame) -> pd.DataFrame:
     return drop_cross_source_duplicates(df)
 
 
+def is_deadly(df: pd.DataFrame) -> pd.Series:
+    """Rows with at least one recorded death (exact count or NOAA order >= 1)."""
+    return (df["deaths"].fillna(0) >= 1) | (df["deaths_order"].fillna(0) >= 1)
+
+
+def attach_impacts(
+    events: pd.DataFrame,
+    impacts: pd.DataFrame,
+    *,
+    timed_tol_ms: int = 5 * 60_000,
+    timed_km: float = 150.0,
+    dated_km: float = 250.0,
+    max_dmag: float = 1.0,
+) -> tuple[pd.DataFrame, int]:
+    """Copy NOAA death tolls onto the USGS events they describe.
+
+    For each NOAA record that reports deaths, candidate USGS events are those
+    within ``timed_tol_ms`` (records with a clock time) or within the same day,
+    widened to -12 h / +36 h for possibly-local dates (records with a date
+    only), that lie within ``timed_km`` / ``dated_km`` and within ``max_dmag``
+    magnitude units. The best candidate by a combined distance-time-magnitude
+    score wins. Returns the updated events and the number of records matched.
+    """
+    out = events.copy()
+    if impacts.empty or out.empty:
+        return out, 0
+    reports = impacts[impacts["deaths"].notna() | impacts["deaths_order"].notna()].dropna(
+        subset=["time_ms", "latitude", "longitude"]
+    )
+    usgs = out[out["source"] == "usgs"].sort_values("time_ms")
+    if reports.empty or usgs.empty:
+        return out, 0
+    t = usgs["time_ms"].to_numpy(np.int64)
+    lat = usgs["latitude"].to_numpy(float)
+    lon = usgs["longitude"].to_numpy(float)
+    mag = usgs["magnitude"].to_numpy(float)
+    index = usgs.index.to_numpy()
+
+    best: dict[object, tuple[float, int | None, int | None]] = {}
+    matched = 0
+    for row in reports.itertuples(index=False):
+        t0 = int(row.time_ms)
+        if bool(row.time_known):
+            lo_t, hi_t, max_km, half = t0 - timed_tol_ms, t0 + timed_tol_ms, timed_km, timed_tol_ms
+        else:
+            lo_t, hi_t = t0 - 12 * 3_600_000, t0 + 36 * 3_600_000
+            max_km, half = dated_km, 86_400_000
+        lo, hi = np.searchsorted(t, lo_t, "left"), np.searchsorted(t, hi_t, "right")
+        if lo == hi:
+            continue
+        n = hi - lo
+        dist = _haversine_km(
+            np.full(n, row.latitude), np.full(n, row.longitude), lat[lo:hi], lon[lo:hi]
+        )
+        has_mag = pd.notna(row.magnitude)
+        dmag = np.abs(mag[lo:hi] - row.magnitude) if has_mag else np.zeros(n)
+        ok = (dist <= max_km) & (dmag <= max_dmag)
+        if not ok.any():
+            continue
+        score = dist / max_km + np.abs(t[lo:hi] - t0) / half + dmag
+        score[~ok] = np.inf
+        target = index[lo + int(np.argmin(score))]
+        deaths = None if pd.isna(row.deaths) else int(row.deaths)
+        order = None if pd.isna(row.deaths_order) else int(row.deaths_order)
+        # Prefer exact counts; among them the larger toll (two records for one event).
+        rank = float(deaths) if deaths is not None else float(order or 0) - 10.0
+        if target not in best or rank > best[target][0]:
+            best[target] = (rank, deaths, order)
+        matched += 1
+
+    for target, (_rank, deaths, order) in best.items():
+        out.loc[target, "deaths"] = deaths if deaths is not None else pd.NA
+        out.loc[target, "deaths_order"] = order if order is not None else pd.NA
+    return out, matched
+
+
+def split_noaa(
+    noaa: pd.DataFrame, cutoff_ms: int = SOURCE_CUTOFF_MS
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """NOAA records before the cutoff (map events) and from it onwards (death reports)."""
+    if noaa.empty:
+        return noaa, noaa
+    noaa = noaa.drop_duplicates("event_id", keep="last")
+    before = noaa["time_ms"] < cutoff_ms
+    return noaa[before], noaa[~before & noaa["time_ms"].notna()]
+
+
 def combine(
     usgs: pd.DataFrame, noaa: pd.DataFrame, cutoff_ms: int = SOURCE_CUTOFF_MS
 ) -> pd.DataFrame:
@@ -326,6 +453,10 @@ def to_arrow(df: pd.DataFrame) -> pa.Table:
         "mag_type": pa.array(df["mag_type"], type=pa.string(), from_pandas=True),
         "place": pa.array(df["place"], type=pa.string(), from_pandas=True),
         "source": pa.array(df["source"].astype(str), type=pa.string()),
+        "deaths": pa.array(df["deaths"].astype("Int64"), type=pa.int32(), from_pandas=True),
+        "deaths_order": pa.array(
+            df["deaths_order"].astype("Int64"), type=pa.int8(), from_pandas=True
+        ),
     }
     return pa.Table.from_pydict(columns, schema=PARQUET_SCHEMA)
 
@@ -340,8 +471,9 @@ def write_parquet(table: pa.Table, path: Path) -> None:
 
 def clean_frames(usgs_raw: pd.DataFrame, noaa_raw: pd.DataFrame) -> pd.DataFrame:
     """Full in-memory pipeline from raw frames to a finalised frame."""
-    df = combine(normalize_usgs(usgs_raw), normalize_noaa(noaa_raw))
-    return finalize(deduplicate(drop_invalid(df)))
+    noaa_events, impacts = split_noaa(normalize_noaa(noaa_raw))
+    df = deduplicate(drop_invalid(combine(normalize_usgs(usgs_raw), noaa_events)))
+    return finalize(attach_impacts(df, impacts)[0])
 
 
 def run_clean(raw_dir: Path, out_path: Path) -> CleanReport:
@@ -350,12 +482,24 @@ def run_clean(raw_dir: Path, out_path: Path) -> CleanReport:
     noaa_raw = read_noaa_raw(raw_dir)
     if usgs_raw.empty and noaa_raw.empty:
         raise FileNotFoundError(f"No raw data under {raw_dir}; run an ingest command first.")
-    combined = combine(normalize_usgs(usgs_raw), normalize_noaa(noaa_raw))
+    noaa_events, impacts = split_noaa(normalize_noaa(noaa_raw))
+    combined = combine(normalize_usgs(usgs_raw), noaa_events)
     valid = drop_invalid(combined)
     deduped = deduplicate(valid)
-    final = finalize(deduped)
+    with_deaths, matched = attach_impacts(deduped, impacts)
+    final = finalize(with_deaths)
     write_parquet(to_arrow(final), out_path)
-    report = CleanReport(len(usgs_raw), len(noaa_raw), len(valid), len(final), out_path)
+    deadly_reports = int(is_deadly(impacts).sum()) if not impacts.empty else 0
+    report = CleanReport(
+        len(usgs_raw),
+        len(noaa_raw),
+        len(valid),
+        len(final),
+        out_path,
+        impacts=deadly_reports,
+        impacts_matched=matched,
+        deadly_events=int(is_deadly(final).sum()),
+    )
     log.info(
         "Cleaned %d USGS + %d NOAA rows -> %d valid -> %d unique, written to %s",
         report.usgs_raw,
@@ -363,5 +507,13 @@ def run_clean(raw_dir: Path, out_path: Path) -> CleanReport:
         report.after_validation,
         report.after_dedup,
         out_path,
+    )
+    log.info(
+        "Deaths: matched %d of %d post-1900 NOAA death reports to USGS events (unmatched ones "
+        "are usually below the downloaded magnitude floor or outside its years); "
+        "%d events have recorded deaths",
+        matched,
+        deadly_reports,
+        report.deadly_events,
     )
     return report
