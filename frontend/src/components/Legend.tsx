@@ -19,11 +19,11 @@ export function Legend() {
   return (
     <section className="panel w-64 p-3 text-xs" aria-label="Map legend">
       <div className="mb-1.5 flex items-center justify-between">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">Depth</h3>
+        <h3 className="eyebrow">Depth</h3>
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="rounded px-1 text-ink-3 hover:text-ink sm:hidden"
+          className="btn btn-ghost btn-icon sm:hidden"
           aria-label="Hide legend"
         >
           ✕
@@ -49,7 +49,7 @@ export function Legend() {
         </span>
       </div>
 
-      <h3 className="mt-3 mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-3">Magnitude</h3>
+      <h3 className="eyebrow mt-3 mb-1">Magnitude</h3>
       <div className="flex items-end justify-between" style={{ height: maxR * 2 + 14 }}>
         {MAGNITUDES.map((m) => {
           const r = magnitudeToRadius(m);

@@ -57,8 +57,8 @@ export default function SimulatorMap({ location, result, onPlace }: Props) {
         getPosition: (point) => [point.longitude, point.latitude],
         getRadius: 7,
         radiusUnits: 'pixels',
-        getFillColor: [237, 237, 237, 255],
-        getLineColor: [57, 135, 229, 255],
+        getFillColor: [236, 235, 231, 255],
+        getLineColor: [15, 15, 14, 255],
         getLineWidth: 3,
         lineWidthUnits: 'pixels',
         stroked: true,
@@ -112,13 +112,13 @@ export default function SimulatorMap({ location, result, onPlace }: Props) {
         />
       </DeckGL>
       <div className="sim-map-top">
-        <span className="sim-map-hint">Click the map to place an epicenter</span>
-        <button type="button" className="sim-map-center" onClick={center} disabled={!location}>Center on epicenter</button>
+        <span className="panel sim-map-hint">Click the map to place an epicenter</span>
+        <button type="button" className="btn btn-sm" onClick={center} disabled={!location}>Center on epicenter</button>
       </div>
-      {mapError && <p className="sim-map-error" role="status">Some map tiles could not load. You can still enter coordinates and run a scenario.</p>}
-      <div className="sim-map-bottom">
+      {mapError && <p className="callout callout-warn sim-map-error" role="status">Some map tiles could not load. You can still enter coordinates and run a scenario.</p>}
+      <div className="panel sim-map-bottom">
         {result ? <>
-          <span className="sim-eyebrow">Estimated shaking · MMI</span>
+          <span className="eyebrow">Estimated shaking · MMI</span>
           <div className="sim-ring-legend">
             {result.rings.slice().sort((a, b) => a.mmi - b.mmi).map((ring) => <span key={ring.mmi}>
               <i style={{ background: intensity(ring.mmi).color }} />{intensity(ring.mmi).roman}<small>{ring.radius_km.toFixed(0)} km</small>
@@ -126,7 +126,7 @@ export default function SimulatorMap({ location, result, onPlace }: Props) {
           </div>
           <p>Idealized intensity contours; local ground conditions are not represented.</p>
         </> : <>
-          <span className="sim-eyebrow">A hypothetical earthquake</span>
+          <span className="eyebrow">A hypothetical earthquake</span>
           <p>Set a location, magnitude, and depth. Run the scenario to reveal estimated shaking and city exposure.</p>
         </>}
       </div>

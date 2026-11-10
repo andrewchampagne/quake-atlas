@@ -29,7 +29,7 @@ export function CompletenessNotice() {
             onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
             aria-controls="completeness-details"
-            className="text-accent underline-offset-2 hover:underline"
+            className="link"
           >
             {open ? 'Hide details' : 'Details'}
           </button>

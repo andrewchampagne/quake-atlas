@@ -15,7 +15,7 @@ function Section({ title, aside, children }: { title: string; aside?: ReactNode;
   return (
     <section className="border-t border-line px-4 py-3">
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">{title}</h3>
+        <h3 className="eyebrow">{title}</h3>
         {aside && <span className="tnum text-xs text-ink-2">{aside}</span>}
       </div>
       {children}
@@ -49,7 +49,7 @@ function YearInput({
       <input
         type="number"
         inputMode="numeric"
-        className="tnum w-full rounded-md border border-line bg-raised px-2 py-1 text-sm text-ink focus:border-accent focus:outline-none"
+        className="field tnum"
         value={draft ?? String(toSigned(value))}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
@@ -104,11 +104,7 @@ function FilterContent({ meta, filters }: { meta: Meta; filters: Filters }) {
                 type="button"
                 onClick={() => setFilters({ yearRange: p.range })}
                 aria-pressed={active}
-                className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
-                  active
-                    ? 'border-accent bg-accent-soft text-ink'
-                    : 'border-line text-ink-2 hover:border-line-strong hover:text-ink'
-                }`}
+                className="chip"
               >
                 {p.label}
               </button>
@@ -184,7 +180,7 @@ function FilterContent({ meta, filters }: { meta: Meta; filters: Filters }) {
               <label className="flex cursor-pointer items-start gap-2 text-sm">
                 <input
                   type="checkbox"
-                  className="mt-0.5 accent-[var(--color-accent)]"
+                  className="mt-0.5"
                   checked={filters.sources.includes(s.id)}
                   onChange={() => toggleSource(s.id)}
                 />
@@ -207,7 +203,7 @@ function FilterContent({ meta, filters }: { meta: Meta; filters: Filters }) {
         <button
           type="button"
           onClick={resetFilters}
-          className="w-full rounded-md border border-line py-1.5 text-sm text-ink-2 hover:border-line-strong hover:text-ink"
+          className="btn w-full"
         >
           Reset filters
         </button>
@@ -215,12 +211,12 @@ function FilterContent({ meta, filters }: { meta: Meta; filters: Filters }) {
 
       <footer className="px-4 pb-4 text-[11px] leading-relaxed text-ink-3">
         Data:{' '}
-        <a className="underline hover:text-ink-2" href="https://earthquake.usgs.gov/fdsnws/event/1/" target="_blank" rel="noreferrer">
+        <a className="link" href="https://earthquake.usgs.gov/fdsnws/event/1/" target="_blank" rel="noreferrer">
           USGS ComCat
         </a>
         ,{' '}
         <a
-          className="underline hover:text-ink-2"
+          className="link"
           href="https://www.ngdc.noaa.gov/hazel/view/hazards/earthquake/search"
           target="_blank"
           rel="noreferrer"
@@ -267,7 +263,7 @@ export function FilterSidebar() {
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="rounded-md px-2 py-1 text-ink-2 hover:bg-raised hover:text-ink"
+            className="btn btn-ghost btn-icon"
             aria-label="Hide filters"
           >
             «

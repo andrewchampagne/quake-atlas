@@ -15,7 +15,7 @@ export function TopProgress() {
 
 function Spinner() {
   return (
-    <svg className="h-8 w-8 animate-spin text-accent" viewBox="0 0 24 24" aria-hidden="true">
+    <svg className="h-8 w-8 animate-spin text-ink" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" fill="none" />
       <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" />
     </svg>
@@ -42,7 +42,7 @@ export function StartupOverlay() {
           <button
             type="button"
             onClick={retry}
-            className="mt-4 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:brightness-110"
+            className="btn btn-primary mt-4"
           >
             Try again
           </button>
@@ -76,7 +76,7 @@ export function ErrorToast() {
           ●
         </span>
         <span className="flex-1 text-ink">Couldn't load earthquakes: {eventsError}</span>
-        <button type="button" onClick={retry} className="rounded-md bg-raised px-2.5 py-1 text-xs hover:bg-line">
+        <button type="button" onClick={retry} className="btn btn-sm">
           Retry
         </button>
       </div>

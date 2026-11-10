@@ -121,7 +121,13 @@ def test_serves_built_frontend(make_client: Callable[..., TestClient], tmp_path:
 
 def test_simulator_rejects_out_of_domain_inputs(client: TestClient) -> None:
     base = {"latitude": 35, "longitude": 140, "magnitude": 7, "depth_km": 10}
-    for key, invalid in (("latitude", 91), ("longitude", 181), ("magnitude", 9), ("depth_km", 0)):
+    for key, invalid in (
+        ("latitude", 91),
+        ("longitude", 181),
+        ("magnitude", 3.9),
+        ("magnitude", 9.6),
+        ("depth_km", 0),
+    ):
         assert client.post("/api/simulate", json={**base, key: invalid}).status_code == 422
 
 

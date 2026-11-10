@@ -184,7 +184,7 @@ class ModelCard(BaseModel):
 class SimulationInput(BaseModel):
     latitude: float = Field(ge=-90, le=90, allow_inf_nan=False)
     longitude: float = Field(ge=-180, le=180, allow_inf_nan=False)
-    magnitude: float = Field(ge=5, le=7.9, allow_inf_nan=False)
+    magnitude: float = Field(ge=4, le=9.5, allow_inf_nan=False)
     depth_km: float = Field(ge=1, le=70, allow_inf_nan=False)
 
 
@@ -198,3 +198,6 @@ class Simulation(BaseModel):
     analogs: AnalogSummary
     recurrence: Recurrence
     model: ModelCard
+    warnings: list[str] = Field(
+        default_factory=list, description="Ways this scenario falls outside the models' domain."
+    )

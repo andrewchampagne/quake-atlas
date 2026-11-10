@@ -36,14 +36,61 @@ FEATURES = ["magnitude", "depth_km", "epicentral_mmi"] + [
 EDGES = np.array([0, 1, 10, 100, 1000, 10000, np.inf])
 LABELS = ["0", "1-9", "10-99", "100-999", "1,000-9,999", "10,000+"]
 
+#: Magnitudes the intensity equation was fitted to (Allen, Wald & Worden 2012).
+SUPPORTED_MAGNITUDE = (5.0, 7.9)
+#: Hypocentral distance the equation was fitted to; widened for great earthquakes.
+BASE_DOMAIN_KM = 300.0
+MAX_DOMAIN_KM = 1000.0
+MAX_MAGNITUDE = 9.5
+
+
+def domain_km(magnitude: float, depth_km: float) -> float:
+    """Hypocentral radius used for exposure and shaking rings.
+
+    300 km (the equation's fitted range) up to M7.9. Great earthquakes are felt
+    much further away, so above M7.9 the radius grows linearly to 1,000 km at
+    M9.5, but never past where mean shaking falls to MMI IV. Growing smoothly
+    avoids a jump in exposure between M7.9 and M8.0. Values there are
+    extrapolations.
+    """
+    high = SUPPORTED_MAGNITUDE[1]
+    if magnitude <= high:
+        return BASE_DOMAIN_KM
+    share = min(1.0, (magnitude - high) / (MAX_MAGNITUDE - high))
+    ramp = BASE_DOMAIN_KM + share * (MAX_DOMAIN_KM - BASE_DOMAIN_KM)
+    felt = shaking.ring_radius_km(magnitude, depth_km, 4, max_km=MAX_DOMAIN_KM) or 0.0
+    return float(max(BASE_DOMAIN_KM, min(ramp, np.hypot(felt, depth_km))))
+
+
+def domain_warnings(scenario: SimulationInput) -> list[str]:
+    """Plain-language notes when a scenario is outside what the models were built on."""
+    low, high = SUPPORTED_MAGNITUDE
+    m = scenario.magnitude
+    if m < low:
+        return [
+            f"M{m:.1f} is below the M{low:.1f}-{high:.1f} range of the shaking equation and "
+            "below the M5+ training data, so shaking and fatality estimates are extrapolated."
+        ]
+    if m > high:
+        reach = domain_km(m, scenario.depth_km)
+        return [
+            f"M{m:.1f} is above the M{low:.1f}-{high:.1f} range of the shaking equation, so "
+            "shaking is extrapolated. Earthquakes this large rupture hundreds of kilometres "
+            "of fault; a circular footprint centred on one point understates shaking along "
+            "the rupture.",
+            f"The exposure area was widened to {reach:,.0f} km to cover the larger felt area.",
+        ]
+    return []
+
 
 def exposure(places: Places, scenario: SimulationInput):  # type: ignore[no-untyped-def]
-    """City centroids within the published equation's 300 km distance domain."""
-    indices, distances = places.nearby(scenario.latitude, scenario.longitude, 300)
+    """City centroids within the scenario's distance domain (see :func:`domain_km`)."""
+    reach = domain_km(scenario.magnitude, scenario.depth_km)
+    indices, distances = places.nearby(scenario.latitude, scenario.longitude, reach)
     ids, dist = indices[0], distances[0]
     hypo = shaking.hypocentral_km(dist, scenario.depth_km)
     intensity = shaking.mmi(scenario.magnitude, hypo)
-    keep = (hypo <= 300) & (intensity >= 4)
+    keep = (hypo <= reach) & (intensity >= 4)
     return ids[keep], dist[keep], intensity[keep]
 
 
@@ -69,10 +116,7 @@ def train(settings: Settings) -> ModelCard:
     finally:
         store.close()
     df = df[
-        df.deaths.notna()
-        & (df.deaths >= 0)
-        & df.magnitude.between(5, 7.9)
-        & df.depth_km.between(1, 70)
+        df.deaths.notna() & (df.deaths >= 0) & (df.magnitude >= 5) & df.depth_km.between(1, 70)
     ].sort_values(["year", "rid"])
     if len(df) < 30:
         raise ValueError("Need at least 30 labeled modern events; ingest NOAA and clean first.")
@@ -83,7 +127,7 @@ def train(settings: Settings) -> ModelCard:
                 SimulationInput(
                     latitude=r.latitude,
                     longitude=r.longitude,
-                    magnitude=min(float(r.magnitude), 7.9),
+                    magnitude=float(r.magnitude),
                     depth_km=r.depth_km,
                 ),
             )
@@ -127,7 +171,8 @@ def train(settings: Settings) -> ModelCard:
             "The final model is refitted on all labeled events after chronological evaluation.",
             "City-centroid populations omit rural areas, may overlap, and are modern estimates.",
             "Labels include tsunami deaths; no separate tsunami or building-collapse model.",
-            "Circular shaking omits soil and fault geometry; domain M5-7.9, shallow, 300 km.",
+            "Circular shaking omits soil and fault geometry. The intensity equation is fitted to "
+            "M5-7.9 within 300 km; other magnitudes and the widened M8+ area are extrapolated.",
         ],
     )
     model.fit(x, y)
@@ -195,7 +240,8 @@ class Simulator:
                 median_label="Insufficient city coverage",
                 alert="unavailable",
             )
-        maximum_radius = float(np.sqrt(300**2 - scenario.depth_km**2))
+        reach = domain_km(scenario.magnitude, scenario.depth_km)
+        maximum_radius = float(np.sqrt(reach**2 - scenario.depth_km**2))
         return Simulation(
             input=scenario,
             epicentral_mmi=round(float(shaking.mmi(scenario.magnitude, scenario.depth_km)), 2),
@@ -213,4 +259,5 @@ class Simulator:
             analogs=store.analogs(scenario.latitude, scenario.longitude, scenario.magnitude),
             recurrence=store.recurrence(scenario.latitude, scenario.longitude, scenario.magnitude),
             model=self.card,
+            warnings=domain_warnings(scenario),
         )

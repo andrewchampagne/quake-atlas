@@ -50,7 +50,7 @@ export function SummaryPanel() {
     >
       <header className="flex items-start justify-between gap-2 px-4 pt-3 pb-2">
         <div className={refreshing ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">
+          <div className="eyebrow">
             {localSummary && playback.windowEnabled ? 'Earthquakes in time window' : 'Matching earthquakes'}
           </div>
           <div className="text-3xl leading-tight font-semibold tracking-tight">
@@ -62,7 +62,7 @@ export function SummaryPanel() {
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           aria-controls="summary-body"
-          className="rounded-md px-2 py-1 text-xs text-ink-2 hover:bg-raised hover:text-ink lg:hidden"
+          className="btn btn-ghost btn-sm lg:hidden"
         >
           {open ? 'Less' : 'More'}
         </button>
@@ -70,9 +70,9 @@ export function SummaryPanel() {
 
       <div id="summary-body" className={`${open ? "block" : "hidden"} min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4 lg:block`}>
           {summaryError && (
-            <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-ink">
+            <div className="callout callout-danger block">
               Couldn't load the summary: {summaryError}{' '}
-              <button type="button" onClick={retry} className="text-accent underline">
+              <button type="button" onClick={retry} className="link">
                 Retry
               </button>
             </div>
@@ -105,7 +105,7 @@ export function SummaryPanel() {
           </div>
 
           {downsampled && !noSources && (
-            <div className="flex gap-2 rounded-md border border-warn/40 bg-warn/10 p-2 text-xs leading-snug text-ink">
+            <div className="callout callout-warn">
               <span aria-hidden="true" className="text-warn">
                 ▲
               </span>
@@ -138,9 +138,9 @@ export function SummaryPanel() {
                 refreshing ? 'opacity-60' : ''
               }`}
             >
-              <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-ink-3">
+              <div className="eyebrow flex items-center justify-between">
                 {title}
-                <span className="font-normal normal-case tracking-normal text-accent opacity-80 group-hover:opacity-100">
+                <span className="font-normal normal-case tracking-normal text-ink-2 underline decoration-ink-3 underline-offset-2 group-hover:text-ink">
                   Fly to it →
                 </span>
               </div>

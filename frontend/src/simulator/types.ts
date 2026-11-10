@@ -100,6 +100,8 @@ export interface Simulation {
   analogs: AnalogSummary;
   recurrence: Recurrence;
   model: ModelCard;
+  /** Present when the scenario is outside the models' domain (e.g. extrapolated magnitude). */
+  warnings?: string[];
 }
 
 /** A place returned by GET /api/geocode. */

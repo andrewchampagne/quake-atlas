@@ -26,7 +26,7 @@ export function PinnedEventCard() {
     <section className="panel w-full p-3 text-sm" aria-label="Pinned earthquake">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="text-xs uppercase tracking-wide text-ink-3">Pinned event</div>
+          <div className="eyebrow">Pinned event</div>
           <div className="mt-0.5 text-lg font-semibold">
             {formatMagnitude(detail?.magnitude ?? pinned.magnitude, detail?.mag_type)}
           </div>
@@ -34,7 +34,7 @@ export function PinnedEventCard() {
         <button
           type="button"
           onClick={() => pin(null)}
-          className="rounded-md px-2 py-1 text-ink-2 hover:bg-raised hover:text-ink"
+          className="btn btn-ghost btn-icon"
           aria-label="Unpin event"
         >
           ✕
@@ -66,7 +66,7 @@ export function PinnedEventCard() {
         <button
           type="button"
           onClick={() => flyTo(pinned.longitude, pinned.latitude, 5)}
-          className="rounded-md bg-raised px-2.5 py-1 text-ink hover:bg-line"
+          className="btn btn-sm"
         >
           Zoom to event
         </button>
@@ -75,7 +75,7 @@ export function PinnedEventCard() {
             href={detail.url}
             target="_blank"
             rel="noreferrer noopener"
-            className="rounded-md px-2.5 py-1 text-accent hover:bg-accent-soft"
+            className="btn btn-sm btn-ghost"
           >
             Source page ↗
           </a>

@@ -63,7 +63,7 @@ export function TimeControls() {
           onClick={togglePlay}
           aria-label={playback.playing ? 'Pause' : 'Play through time'}
           title="Play / pause (space)"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent text-white shadow-lg hover:brightness-110"
+          className="btn btn-primary h-11 w-11 shrink-0 !rounded-full !p-0 shadow-lg"
         >
           <PlayIcon playing={playback.playing} />
         </button>
@@ -75,7 +75,7 @@ export function TimeControls() {
           </div>
         </div>
         <div
-          className="hidden shrink-0 rounded-lg border border-line p-0.5 text-xs sm:flex"
+          className="seg hidden shrink-0 sm:inline-flex"
           role="group"
           aria-label="Time filter"
         >
@@ -87,7 +87,6 @@ export function TimeControls() {
                 type="button"
                 aria-pressed={active}
                 onClick={() => setPlayback({ windowEnabled: key === 'window', playing: false })}
-                className={`rounded-md px-2.5 py-1 ${active ? 'bg-raised text-ink' : 'text-ink-2 hover:text-ink'}`}
               >
                 {key === 'all' ? 'All years' : 'Window'}
               </button>
@@ -101,7 +100,7 @@ export function TimeControls() {
           <span className="tnum shrink-0 text-[11px] text-ink-3">{formatYear(y0)}</span>
           <input
             type="range"
-            className="scrubber"
+            className="slider !my-0"
             aria-label="Time window position"
             aria-valuetext={period}
             min={lo}
@@ -119,14 +118,13 @@ export function TimeControls() {
           <label className="flex items-center gap-1.5 text-ink-2 sm:hidden">
             <input
               type="checkbox"
-              className="accent-[var(--color-accent)]"
               checked={playback.windowEnabled}
               onChange={(e) => setPlayback({ windowEnabled: e.target.checked, playing: false })}
             />
             Window
           </label>
           <select
-            className="control"
+            className="field"
             aria-label="Window size"
             value={playback.windowSize}
             onChange={(e) => setPlayback({ windowSize: Number(e.target.value), windowEnabled: true })}
@@ -138,7 +136,7 @@ export function TimeControls() {
             ))}
           </select>
           <select
-            className="control"
+            className="field"
             aria-label="Window mode"
             value={playback.mode}
             onChange={(e) => setPlayback({ mode: e.target.value as 'rolling' | 'cumulative', windowEnabled: true })}
@@ -147,7 +145,7 @@ export function TimeControls() {
             <option value="cumulative">Cumulative</option>
           </select>
           <select
-            className="control"
+            className="field"
             aria-label="Playback speed"
             value={playback.speed}
             onChange={(e) => setPlayback({ speed: Number(e.target.value) })}

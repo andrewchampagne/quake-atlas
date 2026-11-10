@@ -81,10 +81,10 @@ export default function App() {
     <div className="flex h-full flex-col">
       <header className="z-40 flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel-solid px-4 py-2">
         <span className="text-sm font-semibold tracking-tight">Quake Atlas</span>
-        <nav aria-label="App features" className="flex gap-1 rounded-lg bg-raised p-1">
+        <nav aria-label="App features" className="seg">
           {(['explore', 'simulate'] as const).map((item) => (
             <button key={item} type="button" aria-pressed={mode === item}
-              className={`rounded-md px-3 py-1.5 text-sm ${mode === item ? 'bg-accent text-white' : 'text-ink-2 hover:text-ink'}`}
+              className="!px-3 !py-1 !text-[13px]"
               onClick={() => { useQuakeStore.setState((s) => ({ playback: { ...s.playback, playing: false } })); setMode(item); }}>
               {item === 'explore' ? 'Explore history' : 'Simulator'}
             </button>

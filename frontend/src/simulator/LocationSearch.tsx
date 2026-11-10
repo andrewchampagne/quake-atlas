@@ -83,7 +83,7 @@ export function LocationSearch({ initialQuery = '', onSelect }: Props) {
 
   return (
     <div className="sim-search">
-      <label htmlFor={`${id}-input`}>Search for a place</label>
+      <label className="eyebrow" htmlFor={`${id}-input`}>Search for a place</label>
       <div className="sim-search-box">
         <svg viewBox="0 0 20 20" aria-hidden="true">
           <circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
@@ -91,6 +91,7 @@ export function LocationSearch({ initialQuery = '', onSelect }: Props) {
         </svg>
         <input
           id={`${id}-input`}
+          className="field"
           type="search"
           role="combobox"
           aria-expanded={showList}
@@ -113,7 +114,7 @@ export function LocationSearch({ initialQuery = '', onSelect }: Props) {
           onBlur={() => window.setTimeout(() => setOpen(false), 120)}
           onKeyDown={onKeyDown}
         />
-        {status === 'loading' && <span className="sim-search-spinner" aria-hidden="true" />}
+        {status === 'loading' && <span className="spinner" aria-hidden="true" />}
       </div>
       {showList && (
         <ul id={listId} role="listbox" className="sim-search-list" aria-label="Place suggestions">

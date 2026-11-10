@@ -18,7 +18,8 @@ import { formatCompact, formatCount } from '../lib/format';
 import { formatYear } from '../lib/time';
 import { useQuakeStore } from '../store/useQuakeStore';
 
-const BAR_COLOR = '#3987e5';
+// Single series: neutral ink (colour is reserved for data encodings on the map).
+const BAR_COLOR = '#a9a69d';
 const GRID_COLOR = '#2c2c30';
 const AXIS_TEXT = '#77777d';
 
@@ -92,15 +93,15 @@ export function YearChart({ perYear, startYear, endYear, dimmed }: YearChartProp
   return (
     <div className={dimmed ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <div className="mb-1 flex items-center justify-between">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">Events per {unit}</h3>
-        <div className="flex rounded-md border border-line p-0.5 text-[11px]" role="group" aria-label="Chart view">
+        <h3 className="eyebrow">Events per {unit}</h3>
+        <div className="seg" role="group" aria-label="Chart view">
           {(['chart', 'table'] as const).map((v) => (
             <button
               key={v}
               type="button"
               aria-pressed={view === v}
               onClick={() => setView(v)}
-              className={`rounded px-2 py-0.5 capitalize ${view === v ? 'bg-raised text-ink' : 'text-ink-3 hover:text-ink'}`}
+              className="capitalize"
             >
               {v}
             </button>

@@ -47,10 +47,11 @@ export default function SimulationResults({ result }: { result: Simulation }) {
 
   return <div className="sim-results" aria-label="Simulation results">
     <section className="sim-result-section">
-      <div className="sim-section-heading"><h2>Scenario results</h2><span className="sim-result-tag">Hypothetical</span></div>
+      <div className="sim-section-heading"><h2>Scenario results</h2><span className="tag">Hypothetical</span></div>
       <p className="sim-result-input">M{result.input.magnitude.toFixed(1)} · {result.input.depth_km} km deep · {result.input.latitude.toFixed(3)}, {result.input.longitude.toFixed(3)}</p>
+      {result.warnings?.map((warning) => <p key={warning} className="callout callout-warn sim-quality-warning"><span aria-hidden="true">▲</span><span>{warning}</span></p>)}
       <div className="sim-intensity-card">
-        <span className="sim-eyebrow">Epicentral shaking</span>
+        <span className="eyebrow">Epicentral shaking</span>
         <strong style={{ color: epicentral.color }}><span>{epicentral.roman}</span> {epicentral.label}</strong>
         <p>Estimated MMI {result.epicentral_mmi.toFixed(1)} on the Modified Mercalli scale.</p>
       </div>
@@ -69,14 +70,14 @@ export default function SimulationResults({ result }: { result: Simulation }) {
 
     <section className="sim-result-section" aria-labelledby="sim-fatalities-heading">
       <h2 id="sim-fatalities-heading">Reported fatality distribution</h2>
-      <p className="sim-quality-warning">{didNotImprove
+      <p className="callout callout-warn sim-quality-warning"><span aria-hidden="true">▲</span><span>{didNotImprove
         ? 'Experimental model: held-out error did not improve on a simple historical median.'
-        : 'Experimental model: these probabilities are not validated forecasts.'}</p>
+        : 'Experimental model: these probabilities are not validated forecasts.'}</span></p>
       <p className="sim-conditional">Conditional on historical earthquakes with known reported death counts. Selection bias applies; these are not validated forecast probabilities.</p>
       <div className="sim-fatality-median"><span>Median fatality range</span><strong>{result.fatalities.median_label}</strong></div>
       <ul className="sim-fatality-bins" aria-label="Conditional fatality probability bins">
         {result.fatalities.bins.map((bin) => <li key={bin.key} className={bin.key === result.fatalities.median_bin ? 'sim-median-bin' : ''}>
-          <div className="sim-bin-label"><span>{bin.label}{bin.key === result.fatalities.median_bin && <small>median</small>}</span><span>{formatProbability(bin.probability)}</span></div>
+          <div className="sim-bin-label"><span>{bin.label}{bin.key === result.fatalities.median_bin && <small className="tag">median</small>}</span><span>{formatProbability(bin.probability)}</span></div>
           <div className="sim-bar" aria-hidden="true"><span style={{ width: `${Math.max(0, Math.min(1, bin.probability)) * 100}%` }} /></div>
         </li>)}
       </ul>

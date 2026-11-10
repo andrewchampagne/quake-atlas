@@ -23,3 +23,13 @@ export const formatProbability = (value: number) => `${(value * 100).toFixed(1)}
 export function wrapLongitude(longitude: number) {
   return ((longitude + 180) % 360 + 360) % 360 - 180;
 }
+
+/** Scenario limits accepted by the simulator (and validated by the API). */
+export const MAGNITUDE_RANGE = [4, 9.5] as const;
+export const DEPTH_RANGE = [1, 70] as const;
+/** Magnitudes the shaking equation (Allen, Wald & Worden 2012) was fitted to. */
+export const SUPPORTED_MAGNITUDE = [5, 7.9] as const;
+
+export function isExtrapolatedMagnitude(magnitude: number): boolean {
+  return magnitude < SUPPORTED_MAGNITUDE[0] || magnitude > SUPPORTED_MAGNITUDE[1] + 1e-9;
+}

@@ -148,4 +148,21 @@ describe('SimulatorView', () => {
     await new Promise((r) => setTimeout(r, 350));
     expect(searchPlaces).not.toHaveBeenCalled();
   });
+
+  it('offers M4.0–9.5 and flags extrapolated magnitudes', () => {
+    render(<SimulatorView />);
+    const slider = screen.getByLabelText<HTMLInputElement>('Magnitude');
+    expect([slider.min, slider.max]).toEqual(['4', '9.5']);
+    expect(screen.getByText(/Best supported: M5.0–7.9/)).toBeTruthy();
+    fireEvent.change(slider, { target: { value: '9.1' } });
+    expect(screen.getByText(/Outside M5.0–7.9/)).toBeTruthy();
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Run simulation' }).disabled).toBe(false);
+  });
+
+  it('shows server domain warnings with the results', async () => {
+    vi.mocked(simulate).mockResolvedValue({ ...response(), warnings: ['M9.1 is above the M5.0-7.9 range of the shaking equation.'] });
+    render(<SimulatorView />);
+    fireEvent.click(screen.getByRole('button', { name: 'Run simulation' }));
+    expect(await screen.findByText(/M9.1 is above the M5.0-7.9 range/)).toBeTruthy();
+  });
 });

@@ -29,8 +29,8 @@ SCENARIO = {"latitude": 0.0, "longitude": 0.0, "magnitude": 7.0, "depth_km": 10.
         ("latitude", 90.01),
         ("longitude", -180.01),
         ("longitude", 180.01),
-        ("magnitude", 4.99),
-        ("magnitude", 7.91),
+        ("magnitude", 3.99),
+        ("magnitude", 9.51),
         ("depth_km", 0.99),
         ("depth_km", 70.01),
         *[
@@ -47,7 +47,7 @@ def test_scenario_rejects_outside_domain_and_nonfinite_values(field: str, value:
 
 @pytest.mark.parametrize(
     ("latitude", "longitude", "magnitude", "depth_km"),
-    [(-90.0, -180.0, 5.0, 1.0), (90.0, 180.0, 7.9, 70.0)],
+    [(-90.0, -180.0, 4.0, 1.0), (90.0, 180.0, 9.5, 70.0)],
 )
 def test_scenario_domain_boundaries_are_inclusive(
     latitude: float, longitude: float, magnitude: float, depth_km: float
@@ -299,3 +299,42 @@ def test_train_excludes_unknown_counts_keeps_explicit_zero_and_holds_out_whole_y
     assert loaded.card == card
     assert loaded.residuals.shape == (12,)
     assert np.isfinite(loaded.residuals).all()
+
+
+@pytest.mark.parametrize(("magnitude", "expected"), [(4.5, 300.0), (7.9, 300.0)])
+def test_domain_is_300km_through_supported_range(magnitude: float, expected: float) -> None:
+    assert simulator.domain_km(magnitude, 10.0) == expected
+
+
+def test_domain_widens_smoothly_for_great_earthquakes_and_is_capped() -> None:
+    radii = [simulator.domain_km(m, 20.0) for m in (7.9, 8.0, 8.5, 9.0, 9.5)]
+    assert radii == sorted(radii)
+    assert radii[0] == 300.0 and radii[-1] == simulator.MAX_DOMAIN_KM
+    # No jump just above the supported range: M8.0 adds well under 100 km.
+    assert radii[1] - radii[0] < 100
+    # Never beyond where mean shaking has fallen to MMI IV.
+    for m, r in zip((8.0, 8.5, 9.0), radii[1:4], strict=True):
+        assert float(shaking.mmi(m, r)) >= 4.0 - 1e-6
+
+
+def test_domain_warnings_only_outside_supported_magnitudes() -> None:
+    def warn(m: float) -> list[str]:
+        return simulator.domain_warnings(SimulationInput(**{**SCENARIO, "magnitude": m}))
+
+    assert warn(5.0) == [] and warn(7.9) == []
+    assert "below" in warn(4.2)[0] and "extrapolated" in warn(4.2)[0]
+    great = warn(9.1)
+    assert "above" in great[0] and "rupture" in great[0]
+    assert "widened" in great[1]
+
+
+@pytest.mark.parametrize("magnitude", [4.0, 9.5])
+def test_simulate_accepts_extended_magnitudes(
+    simulation_engine: simulator.Simulator, store: QuakeStore, magnitude: float
+) -> None:
+    result = simulation_engine.simulate(
+        SimulationInput(**{**SCENARIO, "magnitude": magnitude}), store
+    )
+    assert result.warnings
+    reach = simulator.domain_km(magnitude, SCENARIO["depth_km"])
+    assert all(r.radius_km <= reach for r in result.rings)
