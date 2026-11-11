@@ -113,6 +113,16 @@ make test      # pytest (backend) + vitest (frontend)
 make lint      # ruff check + ruff format --check + eslint
 ```
 
+End-to-end UX checks use [Playwright](https://playwright.dev/) with your installed Microsoft Edge, on desktop, tablet and phone viewports. They need the app running with the sample data (`make dev`), so they are not part of CI:
+
+```bash
+npm --prefix frontend run e2e            # flows: one date control, filter chips, deep links, playback, no sideways scroll
+```
+
+```bash
+npm --prefix frontend run e2e:screens    # also writes review screenshots to frontend/e2e/screens/
+```
+
 ## Data sources and licences
 
 | Data | Source | Terms |
@@ -138,33 +148,33 @@ ingest commands.
 | Modern | 1973– | ~M 4.5–5 globally | Dense regional networks (for example in the US and Japan) record much smaller events, so those regions look busier than places with sparse coverage. |
 
 The app keeps this visible in three ways:
-- A completeness notice sits permanently in the time bar.
-- The per-year chart shades these eras.
+- The timeline shades these eras behind its events-per-year track, and its ⓘ button (and the **?** dialog) explains them.
+- The track uses a log scale, so sparse historical eras read as sparse records rather than as empty time.
 - Events with unknown depth (most NOAA records) are drawn in grey.
 
 Magnitudes mix scales (Mw, Ms, mb, ML and others) as reported by each source. They are not converted to a common scale.
 
 ## Using the app
 
+The map fills the screen; each job has one place around it.
+
 - **Map:** each event is one point.
-  - **Size** grows exponentially with magnitude: each magnitude step multiplies the radius by 1.8.
-  - **Colour** encodes depth, from bright yellow (shallow) through orange and magenta to blue-purple (deep), with grey for unknown depth.
-  - **Hover** a point for date, magnitude, depth and place. **Click** it to pin it with full details and a link to the source agency.
-- **Filters (left):**
-  - **Date range:** presets, a slider that gives more room to recent years, and year inputs (type −464 for 464 BCE).
-  - **Magnitude**, **depth** and **source**.
-  - Changes apply on the GPU immediately. The data is refetched (debounced) only when the loaded points can't answer the new filters.
-- **Time bar (bottom):**
-  - **Play/pause**; the space bar toggles playback.
-  - **Window:** a rolling or cumulative window of 1–500 years.
-  - **Speed:** 0.25–250 years per second.
-  - The current period is shown large, with the number of points currently on the map.
-- **Summary (right):**
-  - Total matching events.
-  - The strongest event; click it to fly there.
-  - Events per year, grouped into multi-year bars for long ranges. Click a bar to jump the time window to that period. A table view is available.
-- **Downsampling:** if more than 300,000 events match, the server returns the 300,000 strongest. The summary panel says so and shows the magnitude cutoff that was applied.
-- **Earthquake families:** click any instrumental event to see its family, the foreshocks, mainshock and aftershocks linked to it, drawn as lines from each event to its parent. See [Earthquake families](#earthquake-families).
+  - **Size** grows with magnitude (each step multiplies the radius by 1.8); **colour** shows depth, from yellow (shallow) through orange and magenta to blue-purple (deep), grey for unknown.
+  - **Hover** for a quick summary; **click** to select it.
+- **Timeline (bottom)** is the only place that controls time.
+  - The track shows events per year over the whole catalog, with shaded catalog eras. It stretches recent years, where most records are, and uses a log scale so sparse historical eras stay visible.
+  - Drag its two handles to choose the date range, or click the period label to type years and pick presets (type −464 for 464 BCE).
+  - Click a bar to show just that period. **Play** sweeps a window through the range; drag the window to scrub, and ⚙ sets its length, speed and whether earlier years accumulate. **Show all years** (or Esc) clears it.
+  - ⓘ explains why older eras look sparse.
+- **Filters (top left):** magnitude, depth, sources and *Hide foreshocks and aftershocks*, each with quick presets. Active filters appear as chips beside the button; click a chip to remove it.
+- **Inspector (right; a bottom sheet on phones):**
+  - With nothing selected: how many earthquakes are shown, recorded deaths, the strongest and deadliest events, the largest earthquake families and an *Events by period* table.
+  - With an earthquake selected: its details and source link, plus **Family** (generations, the parent/child tree and how families are found) and, for M6.5+ mainshocks, **Forecast** tabs. The tab you pick stays open as you move between events. Hide the panel with the › button.
+- **Shareable links:** the address bar always holds the current filters, window, selected earthquake and tab (for example `#/explore?y=2000..2024&e=21169&tab=family`). Reloading restores the view, and Back undoes a selection.
+- **Keyboard:** Space plays or pauses, ← → step the window, Esc deselects and then shows all years. The **?** button lists these, explains catalog completeness and credits the data.
+- **Downsampling:** if more than 300,000 events match, the server returns the 300,000 strongest and the inspector says so, with the magnitude cutoff.
+
+Filter changes apply on the GPU immediately; data is refetched (debounced) only when the loaded points can't answer the new filters.
 
 ## API
 
@@ -270,12 +280,16 @@ backend/
     cli.py         `uv run quakes sample | ingest-usgs | ingest-noaa | ingest-full | clean | build-families | serve`
   tests/           pytest: cleaning, queries, ingestion (mocked HTTP), API
 frontend/
-  src/components/  MapView, FilterSidebar, TimeControls, SummaryPanel, YearChart, Legend,
-                   CompletenessNotice, HoverTooltip, PinnedEventCard, StatusOverlays,
-                   FamilyPanel, FamilyTree, AftershockForecast, ProximityPlot
-  src/store/       Zustand store, data sync (debounce + refetch decisions), playback loop
+  src/components/  MapView, Legend, HoverTooltip, HelpDialog, StatusOverlays, FamilyTree,
+                   AftershockForecast, ProximityPlot
+    timeline/      Timeline, TimelineTrack, DateRangeEditor, PlaybackSettings, EraInfo
+    filters/       FilterBar (popover + chips)
+    inspector/     Inspector (column / phone sheet), OverviewPanel, EventPanel, FamilyTab
+    ui/            Radix popover wrapper, icons
+  src/store/       Zustand store, data sync, URL hash sync, playback loop and shortcuts
   src/api/         typed client, Arrow decoding
-  src/lib/         scales, filters, time, bins, eras, playback, formatting (unit-tested)
+  src/lib/         scales, filters, URL state, timeline bins, time, eras, playback (unit-tested)
+  e2e/             Playwright UX tests and review screenshots
 data/              raw/ and processed/ (gitignored)
 ```
 
@@ -362,18 +376,16 @@ in distance, using either a time window or a KD-tree, whichever is smaller. The
 tests check it against brute force.
 
 **In the app:**
-- Pin an event: the card says whether it is a mainshock, foreshock, aftershock
-  or independent, and lines on the map join every family member to its parent.
-  The bright chain runs from the family's first event to the pinned one. Links
-  follow the playback window.
-- **Family tree →** opens the family panel: event counts, generations, a
-  collapsible parent/child tree (click to pin), and *How families are found*,
-  which shows the two populations in rescaled time and distance with the
-  threshold line.
-- **Aftershocks** in the filter sidebar: **Hide foreshocks and aftershocks**
-  shows a declustered catalog (about a third of the sample's instrumental events
-  disappear, and the per-year chart shows background seismicity). The largest
-  families are one click away.
+- Select an event: the inspector says whether it is a mainshock, foreshock,
+  aftershock or independent, and lines on the map join every family member to
+  its parent. The bright chain runs from the family's first event to the
+  selected one. Links follow the playback window.
+- The **Family** tab shows event counts, generations, a collapsible parent/child
+  tree (click to select) and *How families are found*, which plots the two
+  populations in rescaled time and distance with the threshold line.
+- **Hide foreshocks and aftershocks** (Filters) shows a declustered catalog:
+  about a third of the sample's instrumental events disappear, and the timeline
+  shows background seismicity. The largest families are listed in the overview.
 
 **Retrospective aftershock forecast.** For families with an M6.5+ mainshock, the
 panel fits the Omori–Utsu law `λ(t) = K / (t + c)^p` (maximum likelihood with K

@@ -9,7 +9,7 @@
 import { decodeDeathToll } from '../api/deaths';
 import type { EventColumns, Meta, ServerQuery, StrongestEvent, Summary, YearCount } from '../api/types';
 import { isDependentRole } from './family';
-import { decimalYearToMs, yearOf, yearStartMs } from './time';
+import { decimalYearToMs, formatYear, yearOf, yearStartMs } from './time';
 
 export interface Filters {
   /** Inclusive astronomical years. */
@@ -275,6 +275,43 @@ export function gpuFilterRange(
     depth,
     [Math.min(...codes), Math.max(...codes)],
   ];
+}
+
+export interface FilterChip {
+  key: 'years' | 'mag' | 'depth' | 'sources' | 'declustered';
+  label: string;
+  /** Patch that removes this filter. */
+  clear: Partial<Filters>;
+}
+
+const SOURCE_SHORT: Record<string, string> = { usgs: 'USGS', noaa: 'NOAA' };
+
+/** One removable chip per filter that narrows the dataset. */
+export function activeFilterChips(filters: Filters, meta: Meta): FilterChip[] {
+  const defaults = defaultFilters(meta);
+  const chips: FilterChip[] = [];
+  const [y0, y1] = filters.yearRange;
+  if (y0 > meta.min_year || y1 < meta.max_year) {
+    chips.push({ key: 'years', label: `${formatYear(y0)} – ${formatYear(y1)}`, clear: { yearRange: defaults.yearRange } });
+  }
+  const [m0, m1] = filters.magRange;
+  const [mb0, mb1] = magBounds(meta);
+  if (m0 > mb0 + 1e-6 || m1 < mb1 - 1e-6) {
+    const label = m1 >= mb1 - 1e-6 ? `M ${m0.toFixed(1)}+` : m0 <= mb0 + 1e-6 ? `Up to M ${m1.toFixed(1)}` : `M ${m0.toFixed(1)}–${m1.toFixed(1)}`;
+    chips.push({ key: 'mag', label, clear: { magRange: defaults.magRange } });
+  }
+  if (isDepthActive(filters, meta)) {
+    const [d0, d1] = filters.depthRange;
+    const [, db1] = depthBounds(meta);
+    const label = d1 >= db1 ? `${d0}+ km deep` : `${d0}–${d1} km deep`;
+    chips.push({ key: 'depth', label, clear: { depthRange: defaults.depthRange } });
+  }
+  if (!defaults.sources.every((s) => filters.sources.includes(s))) {
+    const names = defaults.sources.filter((s) => filters.sources.includes(s)).map((s) => SOURCE_SHORT[s] ?? s.toUpperCase());
+    chips.push({ key: 'sources', label: names.length ? `${names.join(' + ')} only` : 'No sources', clear: { sources: defaults.sources } });
+  }
+  if (filters.declustered) chips.push({ key: 'declustered', label: 'No aftershocks', clear: { declustered: false } });
+  return chips;
 }
 
 /**

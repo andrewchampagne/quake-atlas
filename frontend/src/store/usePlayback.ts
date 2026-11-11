@@ -19,18 +19,32 @@ export function usePlayback(): void {
   }, [playing]);
 }
 
-/** Space toggles playback, Escape unpins (ignored while typing in a control). */
+/** A popover or dialog is open; it owns Escape and focus. */
+function overlayOpen(): boolean {
+  return Boolean(document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"]'));
+}
+
+/**
+ * Space plays/pauses, ←/→ step the playback window, Escape deselects the event
+ * (then clears the window). Ignored while typing in a control or with an overlay open.
+ */
 export function useKeyboardShortcuts(): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
       const el = e.target as HTMLElement | null;
       if (el && (el.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(el.tagName))) return;
+      if (overlayOpen()) return;
       const state = useQuakeStore.getState();
       if (e.code === 'Space') {
         e.preventDefault();
         state.togglePlay();
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        state.stepWindow(e.key === 'ArrowLeft' ? -1 : 1);
       } else if (e.key === 'Escape') {
-        state.pin(null);
+        if (state.pinned) state.pin(null);
+        else if (state.playback.windowEnabled) state.clearWindow();
       }
     };
     window.addEventListener('keydown', onKey);

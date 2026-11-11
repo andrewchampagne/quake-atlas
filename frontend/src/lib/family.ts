@@ -123,6 +123,19 @@ export function describeRole(family: Family): string {
   }
 }
 
+/** Why the event has (or lacks) a parent, in plain words; null for unclassified events. */
+export function linkExplanation(family: Family): string | null {
+  const nn = family.neighbour;
+  if (!nn) return null;
+  const th = formatLogEta(nn.threshold);
+  if (nn.linked) {
+    return `Its nearest earlier neighbour is close enough in time, distance and magnitude to be its parent: log₁₀ η = ${formatLogEta(nn.log_eta)}, below the threshold of ${th}.`;
+  }
+  const starts = family.size > 1 ? 'so it is the first event of its family' : 'so it stands alone';
+  if (nn.log_eta == null) return `No earlier event comes anywhere near the threshold of ${th}, ${starts}.`;
+  return `Its nearest earlier neighbour is too far away to be its parent (log₁₀ η = ${formatLogEta(nn.log_eta)}, threshold ${th}), ${starts}.`;
+}
+
 export function plural(n: number, noun: string): string {
   return `${n.toLocaleString('en-US')} ${noun}${n === 1 ? '' : 's'}`;
 }

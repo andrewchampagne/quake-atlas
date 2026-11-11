@@ -7,7 +7,10 @@
  */
 export interface YearScale {
   toPos(year: number): number;
+  /** Whole year at a position. */
   toYear(pos: number): number;
+  /** Fractional year at a position (for dragging a playback window). */
+  toDecimalYear(pos: number): number;
 }
 
 const ANCHORS: readonly [number, number][] = [
@@ -31,6 +34,17 @@ export function makeYearScale(minYear: number, maxYear: number): YearScale {
   const cum = [0];
   for (const w of weights) cum.push(cum.at(-1)! + w / total);
 
+  const toDecimalYear = (pos: number): number => {
+    const p = Math.min(1, Math.max(0, pos));
+    for (let i = 1; i < cum.length; i++) {
+      if (p <= cum[i]) {
+        const t = cum[i] === cum[i - 1] ? 0 : (p - cum[i - 1]) / (cum[i] - cum[i - 1]);
+        return years[i - 1] + t * (years[i] - years[i - 1]);
+      }
+    }
+    return maxYear;
+  };
+
   return {
     toPos(year) {
       if (maxYear === minYear) return 0;
@@ -43,15 +57,7 @@ export function makeYearScale(minYear: number, maxYear: number): YearScale {
       }
       return 1;
     },
-    toYear(pos) {
-      const p = Math.min(1, Math.max(0, pos));
-      for (let i = 1; i < cum.length; i++) {
-        if (p <= cum[i]) {
-          const t = cum[i] === cum[i - 1] ? 0 : (p - cum[i - 1]) / (cum[i] - cum[i - 1]);
-          return Math.round(years[i - 1] + t * (years[i] - years[i - 1]));
-        }
-      }
-      return maxYear;
-    },
+    toYear: (pos) => Math.round(toDecimalYear(pos)),
+    toDecimalYear,
   };
 }

@@ -50,6 +50,39 @@ describe('useQuakeStore', () => {
     expect(useQuakeStore.getState().playback.windowStart).toBeCloseTo(2000.5);
   });
 
+  it('steps and clears the playback window', () => {
+    const s = useQuakeStore.getState();
+    s.setFilters({ yearRange: [2000, 2024] });
+    useQuakeStore.getState().setPlayback({ windowSize: 5 });
+    useQuakeStore.getState().stepWindow(1);
+    expect(useQuakeStore.getState().playback).toMatchObject({ windowEnabled: true, windowStart: 2000 });
+    useQuakeStore.getState().stepWindow(1);
+    expect(useQuakeStore.getState().playback.windowStart).toBe(2005);
+    useQuakeStore.getState().stepWindow(-1);
+    useQuakeStore.getState().stepWindow(-1);
+    expect(useQuakeStore.getState().playback.windowStart).toBe(2000); // clamped at the start
+    useQuakeStore.getState().clearWindow();
+    expect(useQuakeStore.getState().playback).toMatchObject({ windowEnabled: false, playing: false });
+    useQuakeStore.getState().stepWindow(-1); // from "all years", stepping back starts at the end
+    expect(useQuakeStore.getState().playback.windowStart).toBe(2020);
+  });
+
+  it('keeps the inspector tab while moving between events, and resets it on deselect', () => {
+    const event = { rid: 1, longitude: 0, latitude: 0, magnitude: 6 };
+    useQuakeStore.getState().pin(event);
+    useQuakeStore.getState().setInspectorTab('family');
+    useQuakeStore.getState().pin({ ...event, rid: 2 });
+    expect(useQuakeStore.getState().inspectorTab).toBe('family');
+    useQuakeStore.getState().pin(null);
+    expect(useQuakeStore.getState().inspectorTab).toBe('details');
+  });
+
+  it('reopens a collapsed inspector when an event is selected', () => {
+    useQuakeStore.getState().setInspectorCollapsed(true);
+    useQuakeStore.getState().pin({ rid: 1, longitude: 0, latitude: 0, magnitude: 6 });
+    expect(useQuakeStore.getState().inspectorCollapsed).toBe(false);
+  });
+
   it('retry bumps the reload token and drops failed events', () => {
     useQuakeStore.setState({ eventsStatus: 'error', eventsError: 'boom' });
     const before = useQuakeStore.getState().reloadToken;

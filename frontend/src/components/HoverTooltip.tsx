@@ -46,7 +46,7 @@ export function HoverTooltip() {
       <div className="mt-1 min-h-4 truncate text-ink">
         {detail ? (detail.place ?? 'Unnamed location') : <span className="text-ink-3">Loading place…</span>}
       </div>
-      <div className="mt-1 text-[10px] text-ink-3">Click to pin</div>
+      <div className="mt-1 text-[10px] text-ink-3">Click for details</div>
     </div>
   );
 }

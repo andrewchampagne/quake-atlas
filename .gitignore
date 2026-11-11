@@ -16,6 +16,11 @@ frontend/dist/
 *.tsbuildinfo
 coverage/
 
+# Playwright output and review screenshots
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e/screens/
+
 # Editors / OS
 .vscode/
 .idea/
