@@ -30,6 +30,8 @@ export function decodeEvents(buffer: ArrayBuffer | Uint8Array): EventColumns {
     deaths: table.getChild('deaths')
       ? column(table, 'deaths', Float32Array)
       : new Float32Array(table.numRows).fill(Number.NaN),
+    // Servers without families (or older ones) omit roles: every event is unclassified.
+    role: table.getChild('role') ? column(table, 'role', Uint8Array) : new Uint8Array(table.numRows),
   };
 }
 

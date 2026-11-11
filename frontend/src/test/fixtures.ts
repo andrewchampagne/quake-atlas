@@ -21,6 +21,7 @@ export const FILTERS: Filters = {
   magRange: [3.0, 9.1],
   depthRange: [-4, 681],
   sources: ['usgs', 'noaa'],
+  declustered: false,
 };
 
 export const PLAYBACK: Playback = {

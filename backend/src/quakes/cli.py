@@ -6,7 +6,8 @@ sample        USGS M5+ 2000-2024 + NOAA pre-1900, then clean (quick end-to-end d
 ingest-usgs   Download USGS ComCat for a year range and magnitude floor
 ingest-noaa   Download the NOAA Significant Earthquake Database (pre-1900 by default)
 ingest-full   USGS 1900-present (default M2.5+) + NOAA, then clean
-clean         Rebuild data/processed/earthquakes.parquet from data/raw
+clean         Rebuild data/processed/earthquakes.parquet from data/raw (and the families)
+build-families  Group instrumental events into foreshock/mainshock/aftershock families
 serve         Run the API with uvicorn
 """
 
@@ -51,6 +52,16 @@ def _clean(_args: argparse.Namespace, settings: Settings) -> None:
     from quakes.clean import run_clean
 
     run_clean(settings.raw_dir, settings.parquet_path)
+    # Row ids change with every clean, so families must be rebuilt with it.
+    _build_families(argparse.Namespace(min_mag=None), settings)
+
+
+def _build_families(args: argparse.Namespace, settings: Settings) -> None:
+    from quakes.families import build_families
+
+    if not settings.parquet_path.exists():
+        raise SystemExit(f"No catalog at {settings.parquet_path}; run `quakes sample` first.")
+    build_families(settings.parquet_path, settings.families_path, min_magnitude=args.min_mag)
 
 
 def _sample(args: argparse.Namespace, settings: Settings) -> None:
@@ -105,6 +116,14 @@ def build_parser() -> argparse.ArgumentParser:
     noaa.set_defaults(func=_ingest_noaa)
 
     sub.add_parser("clean", help="rebuild the processed Parquet file").set_defaults(func=_clean)
+
+    families = sub.add_parser(
+        "build-families", help="cluster events into foreshock/mainshock/aftershock families"
+    )
+    families.add_argument(
+        "--min-mag", type=float, default=None, help="only cluster events at or above this magnitude"
+    )
+    families.set_defaults(func=_build_families)
 
     sub.add_parser(
         "prepare-simulator", help="download exposure data and train the scenario model"

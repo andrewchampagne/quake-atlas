@@ -28,6 +28,9 @@ NATURAL_EARTH_BASE = (
 PLACES_FILE = "ne_10m_populated_places_simple.geojson"
 COUNTRIES_FILE = "ne_110m_admin_0_countries.geojson"
 
+#: Earthquake families (nearest-neighbour clusters), next to the processed catalog.
+FAMILIES_FILE = "families.parquet"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -52,6 +55,10 @@ class Settings:
     @property
     def places_path(self) -> Path:
         return self.processed_dir / "places.parquet"
+
+    @property
+    def families_path(self) -> Path:
+        return self.processed_dir / FAMILIES_FILE
 
     @property
     def model_path(self) -> Path:

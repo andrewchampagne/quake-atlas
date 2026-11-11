@@ -45,3 +45,15 @@ export function useDataSync(): void {
     return () => controller.abort();
   }, [meta, debounced, reloadToken]);
 }
+
+/** Loads the family of the pinned event whenever the pin changes (if families exist). */
+export function useFamilySync(): void {
+  const rid = useQuakeStore((s) => s.pinned?.rid ?? null);
+  const ready = useQuakeStore((s) => s.meta?.families_ready ?? false);
+  useEffect(() => {
+    if (rid == null || !ready) return;
+    const controller = new AbortController();
+    void useQuakeStore.getState().loadFamily(rid, controller.signal);
+    return () => controller.abort();
+  }, [rid, ready]);
+}

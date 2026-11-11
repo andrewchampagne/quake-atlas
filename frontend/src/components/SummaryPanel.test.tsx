@@ -28,6 +28,7 @@ function loaded(value: number): EventsData {
     length: 1, rid: new Uint32Array([1]), time: new Float64Array([event.time]),
     lon: new Float32Array([4]), lat: new Float32Array([3]), depth: new Float32Array([10]),
     magnitude: new Float32Array([8]), source: new Uint8Array([1]), deaths: new Float32Array([value]),
+    role: new Uint8Array([0]),
   };
   return {
     ...columns, ...buildAttributes(columns), total: 1, returned: 1,

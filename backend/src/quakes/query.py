@@ -8,22 +8,35 @@ cursor, which makes :class:`QuakeStore` safe to share across request threads.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import duckdb
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from quakes import timeutil
+from quakes import aftershocks, timeutil
+from quakes import families as fam
 from quakes.cache import LRUCache
-from quakes.config import SOURCE_LABELS, SOURCES
+from quakes.config import FAMILIES_FILE, SOURCE_LABELS, SOURCES
 from quakes.models import (
+    AftershockForecast,
     Analog,
     AnalogSummary,
     EventDetail,
+    Family,
+    FamilyEvent,
+    FamilyMembers,
+    FamilyStats,
+    GenerationCount,
+    Histogram,
+    Histogram2D,
+    LargestFamily,
     Meta,
+    NearestNeighbour,
     Range,
     Recurrence,
     SourceInfo,
@@ -32,8 +45,29 @@ from quakes.models import (
     YearCount,
 )
 
+log = logging.getLogger(__name__)
+
 #: Columns of the binary ``/api/events`` payload, in order.
-EVENT_COLUMNS = ("rid", "time", "lon", "lat", "depth_km", "magnitude", "source", "deaths")
+EVENT_COLUMNS = ("rid", "time", "lon", "lat", "depth_km", "magnitude", "source", "deaths", "role")
+
+#: Family members returned at most by :meth:`QuakeStore.family` (strongest first beyond this).
+MAX_FAMILY_MEMBERS = 5000
+#: Smallest mainshock offered an aftershock forecast.
+FORECAST_MIN_MAGNITUDE = 6.5
+MS_PER_DAY = 86_400_000
+
+#: Family columns joined onto the catalog, with their types when no families exist.
+FAMILY_COLUMNS = {
+    "parent_rid": "UINTEGER",
+    "nn_parent_rid": "UINTEGER",
+    "log_eta": "FLOAT",
+    "log_t": "FLOAT",
+    "log_r": "FLOAT",
+    "cluster_id": "UINTEGER",
+    "mainshock_rid": "UINTEGER",
+    "generation": "UINTEGER",
+    "family_size": "UINTEGER",
+}
 
 #: SQL predicate for "at least one recorded death".
 DEADLY_SQL = "(coalesce(deaths, 0) >= 1 OR coalesce(deaths_order, 0) >= 1)"
@@ -62,7 +96,8 @@ class Filters:
 
     Depth semantics: events with unknown depth are included only when neither
     ``min_depth`` nor ``max_depth`` is given. ``deadly_only`` keeps events with
-    at least one recorded death.
+    at least one recorded death. ``declustered`` drops foreshocks and aftershocks
+    (events never analysed for families, such as NOAA records, are kept).
     """
 
     start: int | None = None
@@ -73,6 +108,7 @@ class Filters:
     max_depth: float | None = None
     sources: tuple[str, ...] | None = field(default=None)
     deadly_only: bool = False
+    declustered: bool = False
 
     def __post_init__(self) -> None:
         for lo, hi, name in (
@@ -124,6 +160,8 @@ class Filters:
                 params.extend(self.sources)
         if self.deadly_only:
             clauses.append(DEADLY_SQL)
+        if self.declustered:
+            clauses.append(f"role NOT IN ({', '.join(map(str, fam.DEPENDENT_ROLES))})")
         return (" WHERE " + " AND ".join(clauses)) if clauses else "", params
 
 
@@ -163,6 +201,11 @@ def _opt_float(value: object) -> float | None:
     return None if math.isnan(f) else f
 
 
+def _rounded(value: object, digits: int = 3) -> float | None:
+    f = _opt_float(value)
+    return None if f is None else round(f, digits)
+
+
 def _opt_int(value: object) -> int | None:
     return None if value is None else int(value)  # type: ignore[call-overload]
 
@@ -193,9 +236,15 @@ def _bbox_sql(lat: float, radius_km: float) -> tuple[str, dict[str, float]]:
 
 
 class QuakeStore:
-    """Query interface over the cleaned Parquet catalog."""
+    """Query interface over the cleaned Parquet catalog (plus families, when built)."""
 
-    def __init__(self, parquet_path: Path, *, summary_cache_size: int = 256) -> None:
+    def __init__(
+        self,
+        parquet_path: Path,
+        *,
+        families_path: Path | None = None,
+        summary_cache_size: int = 256,
+    ) -> None:
         self.parquet_path = parquet_path
         self._con = duckdb.connect(":memory:")
         table = pq.read_table(parquet_path)
@@ -208,7 +257,44 @@ class QuakeStore:
         self._con.register("src", table)
         self._con.execute("CREATE TABLE quakes AS SELECT * FROM src ORDER BY time_ms")
         self._con.unregister("src")
+        self.families_info = self._attach_families(
+            families_path or parquet_path.with_name(FAMILIES_FILE)
+        )
+        self._family_stats: FamilyStats | None = None
         self._summary_cache: LRUCache[Filters, Summary] = LRUCache(summary_cache_size)
+
+    def _attach_families(self, path: Path) -> fam.FamiliesInfo | None:
+        """Join ``families.parquet`` onto the catalog, unless it is missing or stale."""
+        info, table = None, None
+        if path.exists():
+            try:
+                table = pq.read_table(path)
+                raw = (table.schema.metadata or {}).get(fam.METADATA_KEY)
+                info = fam.FamiliesInfo.from_json(raw) if raw else None
+            except (OSError, ValueError, TypeError) as exc:
+                log.warning("Ignoring unreadable %s: %s", path, exc)
+        if info is not None and table is not None:
+            self._con.register("fam", table)
+            [(mismatched,)] = self._con.execute(
+                """SELECT count(*) FROM fam f LEFT JOIN quakes q USING (rid)
+                   WHERE q.event_id IS DISTINCT FROM f.event_id"""
+            ).fetchall()
+            if mismatched:
+                log.warning("%s was built for a different catalog; run quakes build-families", path)
+                info = None
+            else:
+                columns = ", ".join(f"f.{name}" for name in FAMILY_COLUMNS)
+                self._con.execute(
+                    f"""CREATE OR REPLACE TABLE quakes AS
+                        SELECT q.*, coalesce(f.role, 0)::UTINYINT AS role, {columns}
+                        FROM quakes q LEFT JOIN fam f USING (rid) ORDER BY q.time_ms"""
+                )
+            self._con.unregister("fam")
+        if info is None:
+            self._con.execute("ALTER TABLE quakes ADD COLUMN role UTINYINT DEFAULT 0")
+            for name, dtype in FAMILY_COLUMNS.items():
+                self._con.execute(f"ALTER TABLE quakes ADD COLUMN {name} {dtype}")
+        return info
 
     def _cursor(self) -> duckdb.DuckDBPyConnection:
         return self._con.cursor()
@@ -242,7 +328,8 @@ class QuakeStore:
                    CASE WHEN deaths IS NOT NULL THEN deaths::FLOAT
                         WHEN deaths_order >= 1 THEN -deaths_order::FLOAT
                         WHEN deaths_order = 0 THEN 0::FLOAT
-                        ELSE 'NaN'::FLOAT END AS deaths
+                        ELSE 'NaN'::FLOAT END AS deaths,
+                   role::UTINYINT           AS role
             FROM quakes{where}
             ORDER BY magnitude DESC, rid
         """
@@ -262,6 +349,7 @@ class QuakeStore:
                     pa.field("magnitude", pa.float32(), nullable=False),
                     pa.field("source", pa.uint8(), nullable=False),
                     pa.field("deaths", pa.float32(), nullable=False),
+                    pa.field("role", pa.uint8(), nullable=False),
                 ]
             )
         )
@@ -410,6 +498,7 @@ class QuakeStore:
             max_points=max_points,
             deadly_events=deadly,
             simulator_ready=simulator_ready,
+            families_ready=self.families_info is not None,
         )
 
     # ------------------------------------------------------------------ simulator support
@@ -559,6 +648,245 @@ class QuakeStore:
                 params={"m": min_magnitude, "y": start_year},
             )
             .to_arrow_table()
+        )
+
+    # ------------------------------------------------------------------ families
+
+    def _family_event(self, rid: int) -> FamilyEvent:
+        row = (
+            self._cursor()
+            .execute(
+                """SELECT rid, event_id, time_ms, latitude, longitude, depth_km, magnitude, place
+                   FROM quakes WHERE rid = ?""",
+                [rid],
+            )
+            .fetchone()
+        )
+        assert row is not None, rid
+        return FamilyEvent(
+            rid=row[0],
+            event_id=row[1],
+            time=row[2],
+            latitude=row[3],
+            longitude=row[4],
+            depth_km=_opt_float(row[5]),
+            magnitude=round(float(row[6]), 2),
+            place=row[7],
+        )
+
+    def _threshold(self) -> float:
+        if self.families_info is None:
+            raise RuntimeError("families have not been built")
+        return self.families_info.threshold
+
+    def family(self, rid: int, *, max_members: int = MAX_FAMILY_MEMBERS) -> Family | None:
+        """The family containing ``rid`` with its members, or ``None`` if ``rid`` does not exist."""
+        threshold = self._threshold()
+        cur = self._cursor()
+        row = cur.execute(
+            """SELECT role, cluster_id, mainshock_rid, parent_rid, nn_parent_rid,
+                      log_eta, log_t, log_r
+               FROM quakes WHERE rid = ?""",
+            [rid],
+        ).fetchone()
+        if row is None:
+            return None
+        role, cluster_id, mainshock_rid, parent_rid, nn_rid, log_eta, log_t, log_r = row
+        classified = role != fam.ROLES["unclassified"] and cluster_id is not None
+        where, params = ("cluster_id = ?", [cluster_id]) if classified else ("rid = ?", [rid])
+        cols = cur.execute(
+            f"""SELECT rid, time_ms, latitude, longitude, depth_km, magnitude,
+                       coalesce(parent_rid::BIGINT, -1) AS parent, coalesce(generation, 0) AS gen,
+                       role
+                FROM quakes WHERE {where} ORDER BY time_ms, rid""",
+            params,
+        ).fetchnumpy()
+        rids = np.asarray(cols["rid"], dtype=np.int64)
+        parents = np.asarray(cols["parent"], dtype=np.int64)
+        mags = np.asarray(cols["magnitude"], dtype=float)
+        gens = np.asarray(cols["gen"], dtype=np.int64)
+        roles = np.asarray(cols["role"], dtype=np.int64)
+        keep_rids = {rid, int(cluster_id)} if classified else {rid}
+        if classified and mainshock_rid is not None:
+            keep_rids.add(int(mainshock_rid))
+        keep, display_parent = fam.trim_members(rids, parents, mags, keep_rids, max_members)
+
+        generations = [
+            GenerationCount(
+                generation=int(g),
+                count=int((gens == g).sum()),
+                max_magnitude=round(float(mags[gens == g].max()), 2),
+            )
+            for g in np.unique(gens)
+        ]
+        depth = np.asarray(cols["depth_km"], dtype=float)
+        times = np.asarray(cols["time_ms"], dtype=np.int64)
+        members = FamilyMembers(
+            rid=rids[keep].tolist(),
+            time=times[keep].tolist(),
+            latitude=np.asarray(cols["latitude"], dtype=float)[keep].tolist(),
+            longitude=np.asarray(cols["longitude"], dtype=float)[keep].tolist(),
+            depth_km=[None if math.isnan(d) else round(d, 2) for d in depth[keep].tolist()],
+            magnitude=[round(m, 2) for m in mags[keep].tolist()],
+            parent_rid=[None if p < 0 else p for p in display_parent[keep].tolist()],
+            generation=gens[keep].tolist(),
+            role=[fam.ROLE_NAMES[int(r)] for r in roles[keep]],
+        )
+        mainshock = self._family_event(int(mainshock_rid)) if classified else None
+        neighbour = None
+        if classified:
+            neighbour = NearestNeighbour(
+                rid=nn_rid,
+                log_eta=_rounded(log_eta),
+                log_t=_rounded(log_t),
+                log_r=_rounded(log_r),
+                linked=parent_rid is not None,
+                threshold=threshold,
+            )
+        n_after = int((roles == fam.ROLES["aftershock"]).sum())
+        return Family(
+            rid=rid,
+            role=fam.ROLE_NAMES[int(role)],
+            cluster_id=int(cluster_id) if classified else None,
+            size=len(rids),
+            foreshocks=int((roles == fam.ROLES["foreshock"]).sum()),
+            aftershocks=n_after,
+            generations=generations,
+            mainshock=mainshock,
+            root_rid=int(cluster_id) if classified else None,
+            start_time=int(times.min()) if len(times) else None,
+            end_time=int(times.max()) if len(times) else None,
+            neighbour=neighbour,
+            members=members,
+            truncated=bool(not keep.all()),
+            forecast_eligible=bool(
+                mainshock is not None
+                and mainshock.magnitude >= FORECAST_MIN_MAGNITUDE
+                and n_after > 0
+            ),
+        )
+
+    def family_stats(self) -> FamilyStats:
+        """Method parameters, role counts, proximity histograms and the largest families."""
+        if self._family_stats is not None:
+            return self._family_stats
+        info = self.families_info
+        if info is None:
+            raise RuntimeError("families have not been built")
+        cur = self._cursor()
+        counts = dict(
+            cur.execute("SELECT role, count(*) FROM quakes WHERE role > 0 GROUP BY role").fetchall()
+        )
+        roles = {name: int(counts.get(code, 0)) for name, code in fam.ROLES.items() if code > 0}
+        analysed = sum(roles.values())
+        nn = cur.execute(
+            "SELECT log_eta, log_t, log_r FROM quakes WHERE role > 0 AND log_eta IS NOT NULL"
+        ).fetchnumpy()
+        log_eta = np.asarray(nn["log_eta"], dtype=float)
+        log_t = np.asarray(nn["log_t"], dtype=float)
+        log_r = np.asarray(nn["log_r"], dtype=float)
+
+        def edges(values: np.ndarray, step: float, hi: float | None = None) -> np.ndarray:
+            if len(values) == 0:
+                return np.array([0.0, step])
+            lo_e = math.floor(np.percentile(values, 0.1) / step) * step
+            hi_e = hi if hi is not None else math.ceil(np.percentile(values, 99.9) / step) * step
+            return np.arange(lo_e, max(hi_e, lo_e + step) + step / 2, step)
+
+        eta_edges = edges(log_eta, 0.25, info.log_eta_cap)
+        eta_counts, _ = np.histogram(np.clip(log_eta, eta_edges[0], eta_edges[-1]), eta_edges)
+        x_edges, y_edges = edges(log_t, 0.25), edges(log_r, 0.25)
+        density, _, _ = np.histogram2d(
+            np.clip(log_t, x_edges[0], x_edges[-1]),
+            np.clip(log_r, y_edges[0], y_edges[-1]),
+            [x_edges, y_edges],
+        )
+        largest_rows = cur.execute(
+            f"""SELECT mainshock_rid, count(*) AS size,
+                       count(*) FILTER (WHERE role = {fam.ROLES["foreshock"]}),
+                       count(*) FILTER (WHERE role = {fam.ROLES["aftershock"]})
+                FROM quakes WHERE role >= {fam.ROLES["mainshock"]}
+                GROUP BY mainshock_rid ORDER BY size DESC, mainshock_rid LIMIT 8"""
+        ).fetchall()
+        dependent = roles["foreshock"] + roles["aftershock"]
+        self._family_stats = FamilyStats(
+            threshold=info.threshold,
+            threshold_method=info.threshold_method,
+            b_value=info.b_value,
+            fractal_dimension=info.fractal_dimension,
+            q=info.q,
+            log_eta_cap=info.log_eta_cap,
+            r_min_km=info.r_min_km,
+            min_magnitude=info.min_magnitude,
+            built_at=info.built_at,
+            analysed=analysed,
+            roles=roles,
+            families=roles["mainshock"],
+            clustered_fraction=round(dependent / analysed, 4) if analysed else 0.0,
+            gmm=info.gmm,
+            eta_histogram=Histogram(
+                edges=[round(float(e), 3) for e in eta_edges], counts=eta_counts.tolist()
+            ),
+            density=Histogram2D(
+                x_edges=[round(float(e), 3) for e in x_edges],
+                y_edges=[round(float(e), 3) for e in y_edges],
+                counts=density.astype(int).tolist(),
+            ),
+            largest=[
+                LargestFamily(
+                    mainshock=self._family_event(int(r[0])),
+                    size=int(r[1]),
+                    foreshocks=int(r[2]),
+                    aftershocks=int(r[3]),
+                )
+                for r in largest_rows
+            ],
+        )
+        return self._family_stats
+
+    def aftershock_forecast(
+        self, rid: int, *, fit_days: float, horizon_days: float
+    ) -> AftershockForecast | None:
+        """Omori-Utsu fit to the first ``fit_days`` of the family's aftershocks, compared with
+        what happened up to ``horizon_days``. ``None`` if ``rid`` does not exist."""
+        self._threshold()
+        cur = self._cursor()
+        row = cur.execute(
+            "SELECT role, cluster_id, mainshock_rid FROM quakes WHERE rid = ?", [rid]
+        ).fetchone()
+        if row is None:
+            return None
+        role, cluster_id, mainshock_rid = row
+        classified = role != fam.ROLES["unclassified"] and mainshock_rid is not None
+        mainshock = self._family_event(int(mainshock_rid) if classified else rid)
+        floor_row = cur.execute(
+            "SELECT min(magnitude), max(time_ms) FROM quakes WHERE role > 0"
+        ).fetchone()
+        floor = round(float(floor_row[0]), 2) if floor_row and floor_row[0] is not None else 0.0
+        catalog_end = (
+            int(floor_row[1]) if floor_row and floor_row[1] is not None else mainshock.time
+        )
+        if not classified or mainshock.magnitude < FORECAST_MIN_MAGNITUDE:
+            reason = (
+                "Historical records are not grouped into families."
+                if not classified
+                else f"Forecasts are offered for mainshocks of M {FORECAST_MIN_MAGNITUDE} and up."
+            )
+            return aftershocks.not_eligible(mainshock, fit_days, horizon_days, floor, reason)
+        times = cur.execute(
+            f"""SELECT time_ms FROM quakes
+                WHERE cluster_id = ? AND role = {fam.ROLES["aftershock"]} ORDER BY time_ms""",
+            [cluster_id],
+        ).fetchnumpy()["time_ms"]
+        days = (np.asarray(times, dtype=np.int64) - mainshock.time) / MS_PER_DAY
+        available = (catalog_end - mainshock.time) / MS_PER_DAY
+        return aftershocks.forecast(
+            mainshock,
+            days,
+            fit_days=fit_days,
+            horizon_days=horizon_days,
+            available_days=available,
+            min_magnitude=floor,
         )
 
     def close(self) -> None:

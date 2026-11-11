@@ -1,7 +1,17 @@
 /** Typed client for the Quakes API. */
 import { toSearchParams } from '../lib/filters';
 import { decodeEvents, parseEventsHeaders } from './decode';
-import type { EventColumns, EventDetail, EventsMeta, Meta, ServerQuery, Summary } from './types';
+import type {
+  AftershockForecast,
+  EventColumns,
+  EventDetail,
+  EventsMeta,
+  Family,
+  FamilyStats,
+  Meta,
+  ServerQuery,
+  Summary,
+} from './types';
 
 /** Empty in dev (Vite proxies /api) and in production (same origin). */
 const BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
@@ -78,4 +88,31 @@ export function fetchEventDetail(rid: number): Promise<EventDetail> {
     pending.catch(() => detailCache.delete(rid));
   }
   return pending;
+}
+
+const familyCache = new Map<number, Promise<Family>>();
+
+/** The family of an event (memoised per rid, successful lookups only). */
+export function fetchFamily(rid: number): Promise<Family> {
+  let pending = familyCache.get(rid);
+  if (!pending) {
+    pending = getJson<Family>(`/api/families/${rid}`);
+    familyCache.set(rid, pending);
+    pending.catch(() => familyCache.delete(rid));
+  }
+  return pending;
+}
+
+export function fetchFamilyStats(signal?: AbortSignal): Promise<FamilyStats> {
+  return getJson<FamilyStats>('/api/families/stats', undefined, signal);
+}
+
+export function fetchForecast(
+  rid: number,
+  fitDays: number,
+  horizonDays: number,
+  signal?: AbortSignal,
+): Promise<AftershockForecast> {
+  const params = new URLSearchParams({ fit_days: String(fitDays), horizon_days: String(horizonDays) });
+  return getJson<AftershockForecast>(`/api/families/${rid}/forecast`, params, signal);
 }

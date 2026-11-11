@@ -6,10 +6,14 @@ Endpoints
 ``GET /api/events/{rid}``   Full details for one event.
 ``GET /api/summary``        Total, strongest event and counts per year.
 ``GET /api/meta``           Dataset bounds and available sources.
+``GET /api/families/stats``  Nearest-neighbour clustering parameters and results.
+``GET /api/families/{rid}``  The family (foreshocks, mainshock, aftershocks) of an event.
+``GET /api/families/{rid}/forecast``  Retrospective Omori-Utsu aftershock forecast.
 
 ``/api/events`` and ``/api/summary`` share the filter parameters ``start``,
 ``end`` (epoch ms, end exclusive), ``min_mag``, ``max_mag``, ``min_depth``,
-``max_depth`` and ``sources`` (repeatable or comma-separated).
+``max_depth``, ``sources`` (repeatable or comma-separated) and ``declustered``
+(drop foreshocks and aftershocks).
 
 Run with ``uvicorn quakes.api:app``. If ``frontend/dist`` exists it is served at ``/``.
 """
@@ -32,7 +36,16 @@ from fastapi.staticfiles import StaticFiles
 from quakes.cache import LRUCache
 from quakes.config import Settings
 from quakes.geocode import Geocoder, PlaceResult
-from quakes.models import EventDetail, Meta, Simulation, SimulationInput, Summary
+from quakes.models import (
+    AftershockForecast,
+    EventDetail,
+    Family,
+    FamilyStats,
+    Meta,
+    Simulation,
+    SimulationInput,
+    Summary,
+)
 from quakes.query import Filters, QuakeStore
 
 log = logging.getLogger(__name__)
@@ -78,7 +91,9 @@ class AppState:
     def load(self) -> None:
         if self.store is None and self.settings.parquet_path.exists():
             log.info("Loading %s", self.settings.parquet_path)
-            self.store = QuakeStore(self.settings.parquet_path)
+            self.store = QuakeStore(
+                self.settings.parquet_path, families_path=self.settings.families_path
+            )
 
 
 # Dependencies live at module level so FastAPI can resolve their annotations.
@@ -102,6 +117,15 @@ def get_store(state: Annotated[AppState, Depends(get_state)]) -> QuakeStore:
     return state.store
 
 
+def get_family_store(store: Annotated[QuakeStore, Depends(get_store)]) -> QuakeStore:
+    if store.families_info is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Earthquake families have not been built. Run uv run quakes build-families.",
+        )
+    return store
+
+
 def get_filters(
     start: Annotated[int | None, Query(description="Epoch ms, inclusive")] = None,
     end: Annotated[int | None, Query(description="Epoch ms, exclusive")] = None,
@@ -112,12 +136,17 @@ def get_filters(
     sources: Annotated[
         list[str] | None, Query(description="Repeatable or comma-separated source ids")
     ] = None,
+    declustered: Annotated[
+        bool, Query(description="Drop foreshocks and aftershocks (keeps mainshocks)")
+    ] = False,
 ) -> Filters:
     parsed = None
     if sources is not None:
         parsed = tuple(s.strip() for raw in sources for s in raw.split(",") if s.strip())
     try:
-        return Filters(start, end, min_mag, max_mag, min_depth, max_depth, parsed)
+        return Filters(
+            start, end, min_mag, max_mag, min_depth, max_depth, parsed, declustered=declustered
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -125,6 +154,7 @@ def get_filters(
 StateDep = Annotated[AppState, Depends(get_state)]
 StoreDep = Annotated[QuakeStore, Depends(get_store)]
 FiltersDep = Annotated[Filters, Depends(get_filters)]
+FamilyStoreDep = Annotated[QuakeStore, Depends(get_family_store)]
 
 
 def create_app(settings: Settings | None = None, store: QuakeStore | None = None) -> FastAPI:
@@ -206,6 +236,40 @@ def create_app(settings: Settings | None = None, store: QuakeStore | None = None
     def meta(store: StoreDep) -> Meta:
         """Dataset bounds (time, magnitude, depth) and available sources."""
         return store.meta(settings.max_points, simulator_ready=settings.model_path.exists())
+
+    @app.get("/api/families/stats", response_model=FamilyStats)
+    def family_stats(store: FamilyStoreDep) -> FamilyStats:
+        """Clustering parameters, role counts, proximity histograms and the largest families."""
+        return store.family_stats()
+
+    @app.get("/api/families/{rid}", response_model=Family)
+    def family(rid: int, store: FamilyStoreDep) -> Family:
+        """The family an event belongs to, with its members as parallel columns.
+
+        Families come from nearest-neighbour clustering (Zaliapin & Ben-Zion 2013)
+        of instrumental events; NOAA records are ``unclassified``.
+        """
+        result = store.family(rid)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"No event with rid {rid}")
+        return result
+
+    @app.get("/api/families/{rid}/forecast", response_model=AftershockForecast)
+    def family_forecast(
+        rid: int,
+        store: FamilyStoreDep,
+        fit_days: Annotated[float, Query(gt=0, le=365, description="Fitting window (days)")] = 3,
+        horizon_days: Annotated[
+            float, Query(gt=0, le=3650, description="Forecast horizon (days)")
+        ] = 365,
+    ) -> AftershockForecast:
+        """Fit Omori-Utsu decay to the first ``fit_days`` of aftershocks; compare to the rest."""
+        if horizon_days <= fit_days:
+            raise HTTPException(status_code=422, detail="horizon_days must exceed fit_days")
+        result = store.aftershock_forecast(rid, fit_days=fit_days, horizon_days=horizon_days)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"No event with rid {rid}")
+        return result
 
     @app.post("/api/simulate", response_model=Simulation)
     def simulate(scenario: SimulationInput, store: StoreDep) -> Simulation:

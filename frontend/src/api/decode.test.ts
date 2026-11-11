@@ -28,6 +28,21 @@ describe('decodeEvents', () => {
     expect(cols.source).toBeInstanceOf(Uint8Array);
   });
 
+  it('reads family roles, and treats payloads without them as unclassified', () => {
+    expect(Array.from(decodeEvents(payload()).role)).toEqual([0, 0]);
+    const table = tableFromArrays({
+      rid: new Uint32Array([4]),
+      time: new Float64Array([0]),
+      lon: new Float32Array([0]),
+      lat: new Float32Array([0]),
+      depth_km: new Float32Array([10]),
+      magnitude: new Float32Array([6]),
+      source: new Uint8Array([0]),
+      role: new Uint8Array([4]),
+    });
+    expect(Array.from(decodeEvents(tableToIPC(table, 'stream')).role)).toEqual([4]);
+  });
+
   it('rejects payloads with missing or mistyped columns', () => {
     const missing = tableToIPC(tableFromArrays({ rid: new Uint32Array([1]) }), 'stream');
     expect(() => decodeEvents(missing)).toThrow(/missing column "time"/);

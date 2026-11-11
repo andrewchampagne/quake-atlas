@@ -8,11 +8,21 @@ import { create } from 'zustand';
 import {
   ApiError,
   fetchEvents,
+  fetchFamily,
+  fetchFamilyStats,
   fetchMeta,
   fetchSummary,
   isAbortError,
 } from '../api/client';
-import type { EventColumns, EventsMeta, Meta, ServerQuery, Summary } from '../api/types';
+import type {
+  EventColumns,
+  EventsMeta,
+  Family,
+  FamilyStats,
+  Meta,
+  ServerQuery,
+  Summary,
+} from '../api/types';
 import { buildAttributes, type GpuAttributes } from '../lib/attributes';
 import { defaultFilters, type Filters, type Playback } from '../lib/filters';
 import {
@@ -76,12 +86,23 @@ export interface QuakeState {
   pinned: PinnedEvent | null;
   flyTarget: FlyTarget | null;
 
+  /** Family of the pinned event (may briefly belong to the previous pin while loading). */
+  family: Family | null;
+  familyStatus: Status;
+  familyError: string | null;
+  /** The right column shows the family panel instead of the summary. */
+  familyPanelOpen: boolean;
+  familyStats: FamilyStats | null;
+
   sidebarOpen: boolean;
 
   loadMeta: () => Promise<void>;
   loadEvents: (query: ServerQuery, signal: AbortSignal) => Promise<void>;
   loadSummary: (query: ServerQuery, signal: AbortSignal) => Promise<void>;
   retry: () => void;
+  loadFamily: (rid: number, signal: AbortSignal) => Promise<void>;
+  loadFamilyStats: () => Promise<void>;
+  setFamilyPanelOpen: (open: boolean) => void;
 
   setFilters: (patch: Partial<Filters>) => void;
   resetFilters: () => void;
@@ -110,6 +131,8 @@ const INITIAL_PLAYBACK: Playback = {
 // Monotonic request ids: only the latest request may update its slice of state.
 let eventsRequest = 0;
 let summaryRequest = 0;
+// Shared by every caller while the (static) family statistics are loading.
+let familyStatsRequest: Promise<void> | null = null;
 
 function errorMessage(err: unknown): string {
   if (err instanceof ApiError || err instanceof Error) return err.message;
@@ -142,6 +165,11 @@ export const useQuakeStore = create<QuakeState>()((set, get) => ({
   hover: null,
   pinned: null,
   flyTarget: null,
+  family: null,
+  familyStatus: 'idle',
+  familyError: null,
+  familyPanelOpen: false,
+  familyStats: null,
   sidebarOpen: typeof window === 'undefined' ? true : window.innerWidth >= 1024,
 
   async loadMeta() {
@@ -199,6 +227,30 @@ export const useQuakeStore = create<QuakeState>()((set, get) => ({
     set((s) => ({ reloadToken: s.reloadToken + 1, events: s.eventsStatus === 'error' ? null : s.events }));
   },
 
+  async loadFamily(rid, signal) {
+    set({ familyStatus: 'loading', familyError: null });
+    try {
+      const family = await fetchFamily(rid);
+      if (signal.aborted || get().pinned?.rid !== rid) return;
+      set({ family, familyStatus: 'ready' });
+    } catch (err) {
+      if (signal.aborted) return;
+      set({ familyStatus: 'error', familyError: errorMessage(err) });
+    }
+  },
+
+  loadFamilyStats() {
+    if (get().familyStats) return Promise.resolve();
+    familyStatsRequest ??= fetchFamilyStats()
+      .then((familyStats) => set({ familyStats }))
+      .catch(() => {
+        familyStatsRequest = null; // the sidebar omits the statistics; a later call retries
+      });
+    return familyStatsRequest;
+  },
+
+  setFamilyPanelOpen: (familyPanelOpen) => set({ familyPanelOpen }),
+
   setFilters(patch) {
     const current = get().filters;
     if (!current) return;
@@ -254,7 +306,8 @@ export const useQuakeStore = create<QuakeState>()((set, get) => ({
 
   setVisibleCount: (visibleCount) => set({ visibleCount }),
   setHover: (hover) => set({ hover }),
-  pin: (pinned) => set({ pinned }),
+  pin: (pinned) =>
+    set(pinned ? { pinned } : { pinned, family: null, familyStatus: 'idle', familyPanelOpen: false }),
   flyTo(longitude, latitude, zoom = 4) {
     set({ flyTarget: { longitude, latitude, zoom, nonce: Date.now() } });
   },

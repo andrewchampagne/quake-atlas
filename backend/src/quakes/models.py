@@ -86,6 +86,7 @@ class Meta(BaseModel):
     max_points: int
     deadly_events: int = 0
     simulator_ready: bool = False
+    families_ready: bool = False
 
 
 # --------------------------------------------------------------------------- simulator
@@ -201,3 +202,150 @@ class Simulation(BaseModel):
     warnings: list[str] = Field(
         default_factory=list, description="Ways this scenario falls outside the models' domain."
     )
+
+
+# --------------------------------------------------------------------------- families
+
+
+class FamilyEvent(BaseModel):
+    """A notable member of a family (its mainshock, for example)."""
+
+    rid: int
+    event_id: str
+    time: int
+    latitude: float
+    longitude: float
+    depth_km: float | None
+    magnitude: float
+    place: str | None
+
+
+class FamilyMembers(BaseModel):
+    """Family members in time order, as parallel columns."""
+
+    rid: list[int]
+    time: list[int]
+    latitude: list[float]
+    longitude: list[float]
+    depth_km: list[float | None]
+    magnitude: list[float]
+    parent_rid: list[int | None] = Field(
+        description="Parent within this payload (the nearest included ancestor when truncated)."
+    )
+    generation: list[int]
+    role: list[str]
+
+
+class GenerationCount(BaseModel):
+    generation: int
+    count: int
+    max_magnitude: float
+
+
+class NearestNeighbour(BaseModel):
+    """How the queried event links (or fails to link) to an earlier event."""
+
+    rid: int | None = Field(description="Nearest earlier neighbour; null if none within the cap.")
+    log_eta: float | None
+    log_t: float | None = Field(description="Rescaled time component, log10(T).")
+    log_r: float | None = Field(description="Rescaled distance component, log10(R).")
+    linked: bool = Field(description="True when log_eta is below the threshold (a parent link).")
+    threshold: float
+
+
+class Family(BaseModel):
+    """The family (cluster) an event belongs to (``GET /api/families/{rid}``)."""
+
+    rid: int
+    role: str = Field(description="unclassified, single, mainshock, foreshock or aftershock.")
+    cluster_id: int | None
+    size: int
+    foreshocks: int
+    aftershocks: int
+    generations: list[GenerationCount]
+    mainshock: FamilyEvent | None
+    root_rid: int | None
+    start_time: int | None
+    end_time: int | None
+    neighbour: NearestNeighbour | None
+    members: FamilyMembers
+    truncated: bool = Field(description="True when only the strongest members are included.")
+    forecast_eligible: bool
+
+
+class Histogram(BaseModel):
+    edges: list[float]
+    counts: list[int]
+
+
+class Histogram2D(BaseModel):
+    x_edges: list[float]
+    y_edges: list[float]
+    counts: list[list[int]] = Field(description="counts[i][j]: x bin i, y bin j.")
+
+
+class LargestFamily(BaseModel):
+    mainshock: FamilyEvent
+    size: int
+    foreshocks: int
+    aftershocks: int
+
+
+class FamilyStats(BaseModel):
+    """Method parameters and catalog-wide results (``GET /api/families/stats``)."""
+
+    threshold: float = Field(description="log10(eta) separating clustered from background links.")
+    threshold_method: str
+    b_value: float
+    fractal_dimension: float
+    q: float
+    log_eta_cap: float
+    r_min_km: float
+    min_magnitude: float | None
+    built_at: str
+    analysed: int
+    roles: dict[str, int]
+    families: int = Field(description="Families with two or more events.")
+    clustered_fraction: float
+    gmm: dict[str, list[float]]
+    eta_histogram: Histogram
+    density: Histogram2D = Field(description="Nearest neighbours by log10(T) (x) and log10(R) (y).")
+    largest: list[LargestFamily]
+
+
+class OmoriParameters(BaseModel):
+    k: float = Field(description="Productivity (aftershocks per day at t >> c, times days^p).")
+    c_days: float
+    p: float
+    method: str = Field(description="'maximum-likelihood' or 'generic-shape' (p and c fixed).")
+
+
+class CountPoint(BaseModel):
+    days: float
+    count: int
+
+
+class ForecastPoint(BaseModel):
+    days: float
+    expected: float
+    lower: float | None = None
+    upper: float | None = None
+
+
+class AftershockForecast(BaseModel):
+    """Retrospective Omori-Utsu forecast for a family's mainshock."""
+
+    status: str = Field(description="'ok', 'too-few' or 'not-eligible'.")
+    message: str | None
+    mainshock: FamilyEvent
+    fit_days: float
+    horizon_days: float
+    min_magnitude: float = Field(description="Smallest magnitude in the catalog's aftershocks.")
+    params: OmoriParameters | None
+    n_fit: int
+    observed_after_fit: int
+    expected_after_fit: float | None
+    interval_after_fit: tuple[int, int] | None
+    observed: list[CountPoint]
+    model: list[ForecastPoint]
+    notes: list[str]

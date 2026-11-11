@@ -26,6 +26,11 @@ if [ ! -f "$DATA/processed/earthquakes.parquet" ]; then
   fi
 fi
 
+if [ ! -f "$DATA/processed/families.parquet" ]; then
+  echo "Grouping earthquakes into foreshock/mainshock/aftershock families..."
+  quakes build-families || echo "Family clustering failed; the explorer still works. Restart the container to retry."
+fi
+
 if [ ! -f "$DATA/processed/fatality_model.joblib" ]; then
   echo "Preparing the simulator (city populations + scenario model)..."
   quakes prepare-simulator || echo "Simulator setup failed; the explorer still works. Restart the container to retry."

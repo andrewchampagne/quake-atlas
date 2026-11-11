@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import SimulatorView from './simulator/SimulatorView';
+import { FamilyPanel } from './components/FamilyPanel';
 import { FilterSidebar } from './components/FilterSidebar';
 import { HoverTooltip } from './components/HoverTooltip';
 import { Legend } from './components/Legend';
@@ -8,7 +9,7 @@ import { PinnedEventCard } from './components/PinnedEventCard';
 import { ErrorToast, StartupOverlay, TopProgress } from './components/StatusOverlays';
 import { SummaryPanel } from './components/SummaryPanel';
 import { TimeControls } from './components/TimeControls';
-import { useDataSync } from './store/useDataSync';
+import { useDataSync, useFamilySync } from './store/useDataSync';
 import { useKeyboardShortcuts, usePlayback } from './store/usePlayback';
 import { useQuakeStore } from './store/useQuakeStore';
 
@@ -28,10 +29,12 @@ function useElementHeight<T extends HTMLElement>(fallback: number) {
 
 function ExploreView() {
   useDataSync();
+  useFamilySync();
   usePlayback();
   useKeyboardShortcuts();
   const sidebarOpen = useQuakeStore((s) => s.sidebarOpen);
   const ready = useQuakeStore((s) => s.metaStatus === 'ready');
+  const familyPanelOpen = useQuakeStore((s) => s.familyPanelOpen);
   const [timeBarRef, timeBarHeight] = useElementHeight<HTMLDivElement>(150);
 
   const layoutVars = {
@@ -51,7 +54,7 @@ function ExploreView() {
 
           {/* Right column: summary shrinks (and scrolls) so the legend always fits above the time bar. */}
           <div className="pointer-events-none fixed top-[4.5rem] right-3 z-10 flex max-h-[calc(100dvh-var(--timebar-h)-6rem)] w-[min(20rem,calc(100vw-8.5rem))] flex-col items-end gap-2 lg:w-80">
-            <SummaryPanel />
+            {familyPanelOpen ? <FamilyPanel /> : <SummaryPanel />}
             <div className="pointer-events-auto shrink-0">
               <Legend />
             </div>

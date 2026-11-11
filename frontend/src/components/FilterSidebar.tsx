@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Meta } from '../api/types';
 import { depthBounds, isDepthActive, magBounds, type Filters } from '../lib/filters';
 import { formatCount } from '../lib/format';
@@ -199,6 +199,8 @@ function FilterContent({ meta, filters }: { meta: Meta; filters: Filters }) {
         )}
       </Section>
 
+      {meta.families_ready && <AftershockSection filters={filters} />}
+
       <div className="border-t border-line px-4 py-3">
         <button
           type="button"
@@ -226,6 +228,67 @@ function FilterContent({ meta, filters }: { meta: Meta; filters: Filters }) {
         . Basemap © CARTO, © OpenStreetMap contributors.
       </footer>
     </>
+  );
+}
+
+/** Declustering toggle and shortcuts to the largest earthquake families. */
+function AftershockSection({ filters }: { filters: Filters }) {
+  const setFilters = useQuakeStore((s) => s.setFilters);
+  const stats = useQuakeStore((s) => s.familyStats);
+  const loadFamilyStats = useQuakeStore((s) => s.loadFamilyStats);
+  const pin = useQuakeStore((s) => s.pin);
+  const flyTo = useQuakeStore((s) => s.flyTo);
+  const setFamilyPanelOpen = useQuakeStore((s) => s.setFamilyPanelOpen);
+  useEffect(() => {
+    void loadFamilyStats();
+  }, [loadFamilyStats]);
+
+  return (
+    <Section title="Aftershocks">
+      <label className="flex cursor-pointer items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={filters.declustered}
+          onChange={(e) => setFilters({ declustered: e.target.checked })}
+        />
+        <span className="flex-1">
+          <span className="text-ink">Hide foreshocks and aftershocks</span>
+          <span className="block text-xs text-ink-3">
+            Keeps each family's mainshock and every independent event
+            {stats && <> ({(stats.clustered_fraction * 100).toFixed(0)}% of instrumental events are removed)</>}.
+            Historical records are not classified.
+          </span>
+        </span>
+      </label>
+      {stats && stats.largest.length > 0 && (
+        <div className="mt-3">
+          <h4 className="mb-1 text-[11px] text-ink-3">Largest families</h4>
+          <ul className="space-y-1">
+            {stats.largest.slice(0, 5).map((f) => (
+              <li key={f.mainshock.rid}>
+                <button
+                  type="button"
+                  className="group flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-raised"
+                  onClick={() => {
+                    const m = f.mainshock;
+                    pin({ rid: m.rid, longitude: m.longitude, latitude: m.latitude, magnitude: m.magnitude });
+                    flyTo(m.longitude, m.latitude, 4);
+                    setFamilyPanelOpen(true);
+                  }}
+                >
+                  <span className="tnum shrink-0 font-semibold text-ink">M {f.mainshock.magnitude.toFixed(1)}</span>
+                  <span className="min-w-0 flex-1 truncate text-ink-2 group-hover:text-ink">
+                    {f.mainshock.place ?? 'Unnamed location'}
+                  </span>
+                  <span className="tnum shrink-0 text-ink-3">{formatCount(f.size)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Section>
   );
 }
 

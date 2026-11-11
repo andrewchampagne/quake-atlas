@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { decodeDeathToll, formatDeathToll } from '../api/deaths';
+import { describeRole } from '../lib/family';
 import { formatDepth, formatLatLon, formatMagnitude } from '../lib/format';
 import { useQuakeStore } from '../store/useQuakeStore';
 import { useEventDetail } from './useEventDetail';
@@ -16,6 +17,11 @@ export function PinnedEventCard() {
   const flyTo = useQuakeStore((s) => s.flyTo);
   const events = useQuakeStore((s) => s.events);
   const detail = useEventDetail(pinned?.rid ?? null);
+  const familiesReady = useQuakeStore((s) => s.meta?.families_ready ?? false);
+  const family = useQuakeStore((s) => (s.family && s.family.rid === s.pinned?.rid ? s.family : null));
+  const familyStatus = useQuakeStore((s) => s.familyStatus);
+  const familyPanelOpen = useQuakeStore((s) => s.familyPanelOpen);
+  const setFamilyPanelOpen = useQuakeStore((s) => s.setFamilyPanelOpen);
   const loadedToll = useMemo(() => {
     const index = pinned && events ? events.rid.indexOf(pinned.rid) : -1;
     return index >= 0 ? decodeDeathToll(events?.deaths?.[index]) : {};
@@ -43,6 +49,18 @@ export function PinnedEventCard() {
       <div className="mt-2 text-xs text-ink-2">
         Recorded deaths: <span className="tnum text-ink">{formatDeathToll(detail ?? loadedToll)}</span>
       </div>
+      {familiesReady && (
+        <div className="mt-1.5 flex items-start justify-between gap-2 text-xs">
+          <p className="leading-snug text-ink-2">
+            {family ? describeRole(family) : familyStatus === 'error' ? 'Family unavailable.' : 'Finding its family…'}
+          </p>
+          {family && family.size > 1 && !familyPanelOpen && (
+            <button type="button" className="btn btn-sm shrink-0" onClick={() => setFamilyPanelOpen(true)}>
+              Family tree →
+            </button>
+          )}
+        </div>
+      )}
       {detail ? (
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
           <dt className="text-ink-3">Place</dt>

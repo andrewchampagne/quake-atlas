@@ -5,7 +5,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey.svg)](LICENSE)
 
 An interactive dark-themed world map of earthquakes from 2150 BCE to today, with
-recorded death tolls and a "what if" earthquake simulator.
+recorded death tolls, earthquake family trees (which quakes triggered which), a
+retrospective aftershock forecast, and a "what if" earthquake simulator.
 
 - **Backend:** Python downloads and cleans two catalogs, queries them with DuckDB and serves them through FastAPI.
 - **Frontend:** React and deck.gl draw hundreds of thousands of points on the GPU and filter them there.
@@ -163,6 +164,7 @@ Magnitudes mix scales (Mw, Ms, mb, ML and others) as reported by each source. Th
   - The strongest event; click it to fly there.
   - Events per year, grouped into multi-year bars for long ranges. Click a bar to jump the time window to that period. A table view is available.
 - **Downsampling:** if more than 300,000 events match, the server returns the 300,000 strongest. The summary panel says so and shows the magnitude cutoff that was applied.
+- **Earthquake families:** click any instrumental event to see its family, the foreshocks, mainshock and aftershocks linked to it, drawn as lines from each event to its parent. See [Earthquake families](#earthquake-families).
 
 ## API
 
@@ -174,6 +176,7 @@ All endpoints are under `/api`. `/api/events` and `/api/summary` share these fil
 | `min_mag`, `max_mag` | Inclusive magnitude bounds. |
 | `min_depth`, `max_depth` | Inclusive, in km. Events with unknown depth are excluded whenever either bound is set. |
 | `sources` | `usgs` and/or `noaa`. Repeatable (`sources=usgs&sources=noaa`) or comma-separated. |
+| `declustered` | `true` drops foreshocks and aftershocks, keeping mainshocks, independent events and unclassified NOAA records. |
 
 ### `GET /api/events`
 
@@ -189,6 +192,8 @@ Columns:
 | `depth_km` | float32 | NaN = unknown. |
 | `magnitude` | float32 | |
 | `source` | uint8 | 0 = usgs, 1 = noaa (see `/api/meta`). |
+| `deaths` | float32 | See [Simulator and historical deaths](#simulator-and-historical-deaths). |
+| `role` | uint8 | Family role: 0 not classified, 1 independent, 2 mainshock, 3 foreshock, 4 aftershock. |
 
 Response headers:
 - `X-Total-Count`: events matched before the cap.
@@ -204,7 +209,10 @@ Rows are ordered by descending magnitude, so small events draw on top of large o
 |---|---|
 | `GET /api/events/{rid}` | JSON: `rid, event_id, time, time_label, year, latitude, longitude, depth_km, magnitude, mag_type, place, source, url`. |
 | `GET /api/summary` | JSON: `total`, `strongest` (ties go to the instrumental, then the earlier event), and `per_year: [{year, count}]`. Counts cover every matching event, not just the capped set. |
-| `GET /api/meta` | JSON: time, year, magnitude and depth bounds; `sources` with codes and counts; `total`; `max_points`. |
+| `GET /api/meta` | JSON: time, year, magnitude and depth bounds; `sources` with codes and counts; `total`; `max_points`; `families_ready`. |
+| `GET /api/families/stats` | JSON: clustering parameters, threshold, role counts, the nearest-neighbour density histogram and the largest families. |
+| `GET /api/families/{rid}` | JSON: the event's role, nearest-neighbour link, generation counts and family members as parallel columns (at most 5,000; the strongest are kept). |
+| `GET /api/families/{rid}/forecast` | JSON: Omori–Utsu fit for the family's mainshock (M6.5+). `fit_days` (default 3) and `horizon_days` (default 365) set the windows. |
 
 **Caching:** `/api/events` payloads (raw and gzipped bytes) and summaries are kept in LRU caches keyed by the normalized filters.
 
@@ -254,14 +262,17 @@ backend/
   src/quakes/
     ingest.py      USGS (year windows, auto-split over 20k, retry/backoff, resumable) + NOAA pages
     clean.py       normalise both sources to one schema, validate, dedupe, write Parquet
-    query.py       DuckDB filters, downsampling, summary, meta
+    query.py       DuckDB filters, downsampling, summary, meta, family queries
+    families.py    nearest-neighbour clustering into foreshock/mainshock/aftershock families
+    aftershocks.py Omori-Utsu fitting and the retrospective aftershock forecast
     api.py         FastAPI app (Arrow responses, gzip, CORS, caching, static frontend)
     timeutil.py    BCE-safe calendar math
-    cli.py         `uv run quakes sample | ingest-usgs | ingest-noaa | ingest-full | clean | serve`
+    cli.py         `uv run quakes sample | ingest-usgs | ingest-noaa | ingest-full | clean | build-families | serve`
   tests/           pytest: cleaning, queries, ingestion (mocked HTTP), API
 frontend/
   src/components/  MapView, FilterSidebar, TimeControls, SummaryPanel, YearChart, Legend,
-                   CompletenessNotice, HoverTooltip, PinnedEventCard, StatusOverlays
+                   CompletenessNotice, HoverTooltip, PinnedEventCard, StatusOverlays,
+                   FamilyPanel, FamilyTree, AftershockForecast, ProximityPlot
   src/store/       Zustand store, data sync (debounce + refetch decisions), playback loop
   src/api/         typed client, Arrow decoding
   src/lib/         scales, filters, time, bins, eras, playback, formatting (unit-tested)
@@ -316,6 +327,72 @@ returns shaking rings, city exposure, fatality bins, historical analogs and mode
 metadata. Out-of-domain inputs return 422; missing model assets return 503.
 The Arrow events payload adds `deaths`: NaN unknown, nonnegative exact count,
 or negative -1 through -4 for NOAA ordinal categories.
+
+## Earthquake families
+
+Large earthquakes trigger aftershocks, aftershocks trigger their own, and
+sometimes a quake turns out to have been a foreshock of something bigger. Quake
+Atlas groups every instrumental (USGS) event into **families** with the
+nearest-neighbour method of [Zaliapin & Ben-Zion (2013)](https://doi.org/10.1002/jgrb.50179):
+
+1. For each event, every earlier event gets a proximity
+   `η = t · r^1.6 · 10^(−m)`: time apart in years, epicentral distance in km
+   (floored at 1 km) and the earlier event's magnitude. Bigger earthquakes reach
+   further in time and space.
+2. The earlier event with the smallest η is the event's candidate parent.
+3. `log10 η` has two modes: triggered pairs sit orders of magnitude below
+   independent "background" events. A two-component Gaussian mixture places the
+   threshold between them (log10 η ≈ −5.75 for the sample catalog).
+4. Links below the threshold join events into trees. The largest event in a tree
+   is its **mainshock**, earlier members are **foreshocks**, later ones
+   **aftershocks**; events with no link are **independent**.
+
+```sh
+cd backend
+uv run quakes build-families            # about 10 s for the 44k-event sample
+uv run quakes build-families --min-mag 4.5
+```
+
+`clean`, `sample` and `ingest-full` rebuild the families automatically (row ids
+change with every clean). The result is `data/processed/families.parquet`; the
+API ignores it, with a warning, if it was built for a different catalog. The
+search is exact without comparing every pair: it only evaluates pairs whose
+proximity could fall below a cap (log10 η < −1.5) and finds them shell by shell
+in distance, using either a time window or a KD-tree, whichever is smaller. The
+tests check it against brute force.
+
+**In the app:**
+- Pin an event: the card says whether it is a mainshock, foreshock, aftershock
+  or independent, and lines on the map join every family member to its parent.
+  The bright chain runs from the family's first event to the pinned one. Links
+  follow the playback window.
+- **Family tree →** opens the family panel: event counts, generations, a
+  collapsible parent/child tree (click to pin), and *How families are found*,
+  which shows the two populations in rescaled time and distance with the
+  threshold line.
+- **Aftershocks** in the filter sidebar: **Hide foreshocks and aftershocks**
+  shows a declustered catalog (about a third of the sample's instrumental events
+  disappear, and the per-year chart shows background seismicity). The largest
+  families are one click away.
+
+**Retrospective aftershock forecast.** For families with an M6.5+ mainshock, the
+panel fits the Omori–Utsu law `λ(t) = K / (t + c)^p` (maximum likelihood with K
+profiled out) to the first 1, 3, 7 or 30 days of aftershocks, forecasts the
+count up to 30 days, 1 year or 3 years, and compares it with what the catalog
+recorded. With fewer than 20 aftershocks to fit, p and c are fixed at the
+generic values of Reasenberg & Jones (1989). The 95% band covers Poisson
+randomness only.
+
+**Caveats:**
+- Families depend on the catalog. Events below the magnitude floor are missing,
+  so sparse regions look more independent.
+- Catalogs miss many early aftershocks right after big mainshocks. Fits to the
+  first days can therefore overstate how fast a sequence decays. In the sample,
+  Tohoku's 3-day fit forecasts 93 aftershocks for the rest of its first year
+  (95%: 75–113); the catalog recorded 310.
+- An Omori fit ignores secondary sequences, which ETAS models describe.
+- The forecast is a teaching tool that uses hindsight data, not an operational
+  forecast.
 
 ## License
 

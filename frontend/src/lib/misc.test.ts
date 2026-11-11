@@ -124,6 +124,7 @@ describe('buildAttributes', () => {
       depth: new Float32Array([29, Number.NaN]),
       magnitude: new Float32Array([9.1, 8.5]),
       source: new Uint8Array([0, 1]),
+      role: new Uint8Array([4, 0]), // an aftershock, then an unclassified NOAA record
     });
     expect(Array.from(attrs.positions)).toEqual([
       Math.fround(142.4),
@@ -137,5 +138,6 @@ describe('buildAttributes', () => {
     expect(attrs.filterValues[FILTER_SIZE + 2]).toBe(UNKNOWN_DEPTH_FILTER);
     expect(attrs.filterValues[FILTER_SIZE + 3]).toBe(1);
     expect(Array.from(attrs.colors.slice(4, 8))).toEqual([138, 138, 138, 170]); // grey, unknown depth
+    expect(Array.from(attrs.categories)).toEqual([1, 0]);
   });
 });

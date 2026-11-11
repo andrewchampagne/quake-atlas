@@ -3,6 +3,7 @@
  * Filters and playback then only change uniforms, so interaction stays at 60fps.
  */
 import type { EventColumns } from '../api/types';
+import { isDependentRole } from './family';
 import { UNKNOWN_DEPTH_FILTER } from './filters';
 import { depthToRgb, magnitudeToRadius, type RGB } from './scales';
 import { msToDecimalYear } from './time';
@@ -19,6 +20,8 @@ export interface GpuAttributes {
   colors: Uint8Array;
   /** Interleaved [decimal year, magnitude, depth|-9999, source code]. */
   filterValues: Float32Array;
+  /** Category filter: 1 for foreshocks and aftershocks, else 0. */
+  categories: Uint32Array;
 }
 
 // Colour lookup per whole km avoids interpolating the ramp 300k times.
@@ -38,6 +41,7 @@ export function buildAttributes(cols: EventColumns): GpuAttributes {
   const radii = new Float32Array(n);
   const colors = new Uint8Array(n * 4);
   const filterValues = new Float32Array(n * FILTER_SIZE);
+  const categories = new Uint32Array(n);
   for (let i = 0; i < n; i++) {
     positions[2 * i] = cols.lon[i];
     positions[2 * i + 1] = cols.lat[i];
@@ -54,6 +58,7 @@ export function buildAttributes(cols: EventColumns): GpuAttributes {
     filterValues[f + 1] = mag;
     filterValues[f + 2] = Number.isNaN(depth) ? UNKNOWN_DEPTH_FILTER : depth;
     filterValues[f + 3] = cols.source[i];
+    categories[i] = isDependentRole(cols.role[i]) ? 1 : 0;
   }
-  return { positions, radii, colors, filterValues };
+  return { positions, radii, colors, filterValues, categories };
 }

@@ -4,22 +4,27 @@ import {
   type MapViewState,
   type PickingInfo,
 } from '@deck.gl/core';
-import { DataFilterExtension } from '@deck.gl/extensions';
-import { ScatterplotLayer } from '@deck.gl/layers';
+import { DataFilterExtension, type DataFilterExtensionProps } from '@deck.gl/extensions';
+import { LineLayer, ScatterplotLayer } from '@deck.gl/layers';
 import DeckGL from '@deck.gl/react';
 import { useEffect, useMemo, useState } from 'react';
 import { Map } from 'react-map-gl/maplibre';
 import { FILTER_SIZE } from '../lib/attributes';
 import { MAP_CONTROLLER } from '../lib/mapControls';
 import { maplibregl } from '../lib/maplibre';
-import { gpuFilterRange } from '../lib/filters';
+import { familySegments, type FamilySegment } from '../lib/family';
+import { gpuFilterCategories, gpuFilterRange, visibleWindow } from '../lib/filters';
 import { magnitudeToRadius, zoomRadiusScale } from '../lib/scales';
 import { useQuakeStore, type PinnedEvent } from '../store/useQuakeStore';
 
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 const VIEWS = new DeckMapView({ id: 'map', repeat: true });
 // Module-level so the extension (and its shaders) are created once.
-const FILTER_EXTENSION = new DataFilterExtension({ filterSize: FILTER_SIZE, countItems: true });
+const FILTER_EXTENSION = new DataFilterExtension({ filterSize: FILTER_SIZE, categorySize: 1, countItems: true });
+// Family links are filtered by the child's time only, so they follow playback.
+const LINK_FILTER = new DataFilterExtension({ filterSize: 1 });
+const LINK_COLOR: [number, number, number, number] = [236, 235, 231, 90];
+const PATH_COLOR: [number, number, number, number] = [255, 255, 255, 235];
 const EMPTY_RANGE: [number, number][] = Array.from({ length: FILTER_SIZE }, () => [0, 0]);
 
 type ViewState = MapViewState & {
@@ -50,6 +55,7 @@ export function MapView() {
   const filters = useQuakeStore((s) => s.filters);
   const playback = useQuakeStore((s) => s.playback);
   const pinned = useQuakeStore((s) => s.pinned);
+  const family = useQuakeStore((s) => s.family);
   const setHover = useQuakeStore((s) => s.setHover);
   const pin = useQuakeStore((s) => s.pin);
   const setVisibleCount = useQuakeStore((s) => s.setVisibleCount);
@@ -84,6 +90,7 @@ export function MapView() {
           getRadius: { value: events.radii, size: 1 },
           getFillColor: { value: events.colors, size: 4, normalized: true },
           getFilterValue: { value: events.filterValues, size: FILTER_SIZE },
+          getFilterCategory: { value: events.categories, size: 1 },
         },
       },
     [events],
@@ -93,6 +100,17 @@ export function MapView() {
     () => (filters && meta ? gpuFilterRange(filters, meta, playback) : null),
     [filters, meta, playback],
   );
+
+  // Only draw links for a family that contains the pinned event (not a stale one).
+  const links = useMemo<FamilySegment[]>(() => {
+    if (!family || !pinned || family.size < 2 || !family.members.rid.includes(pinned.rid)) return [];
+    return familySegments(family, pinned.rid);
+  }, [family, pinned]);
+  const linkRange = useMemo<[number, number]>(() => {
+    if (!filters || !playback.windowEnabled) return [-1e9, 1e9];
+    const [t0, t1] = visibleWindow(filters, playback);
+    return [t0, t1];
+  }, [filters, playback]);
 
   const radiusScale = zoomRadiusScale(viewState.zoom);
 
@@ -114,7 +132,22 @@ export function MapView() {
         visible: filterRange !== null,
         extensions: [FILTER_EXTENSION],
         filterRange: filterRange ?? EMPTY_RANGE,
+        filterCategories: filters ? gpuFilterCategories(filters) : [0, 1],
         onFilteredItemsChange: ({ count }: { count: number }) => setVisibleCount(count),
+      }),
+    links.length > 0 &&
+      new LineLayer<FamilySegment, DataFilterExtensionProps<FamilySegment>>({
+        id: 'family-links',
+        data: links,
+        getSourcePosition: (d) => d.source,
+        getTargetPosition: (d) => d.target,
+        getColor: (d) => (d.onPath ? PATH_COLOR : LINK_COLOR),
+        getWidth: (d) => (d.onPath ? 2.5 : 1),
+        widthUnits: 'pixels',
+        getFilterValue: (d) => d.year,
+        filterRange: linkRange,
+        extensions: [LINK_FILTER],
+        pickable: false,
       }),
     pinned &&
       new ScatterplotLayer<PinnedEvent>({

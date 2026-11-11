@@ -8,6 +8,7 @@
  */
 import { decodeDeathToll } from '../api/deaths';
 import type { EventColumns, Meta, ServerQuery, StrongestEvent, Summary, YearCount } from '../api/types';
+import { isDependentRole } from './family';
 import { decimalYearToMs, yearOf, yearStartMs } from './time';
 
 export interface Filters {
@@ -17,6 +18,8 @@ export interface Filters {
   depthRange: [number, number];
   /** Enabled source ids. */
   sources: string[];
+  /** Hide foreshocks and aftershocks (a declustered catalog). */
+  declustered: boolean;
 }
 
 export interface Playback {
@@ -54,6 +57,7 @@ export function defaultFilters(meta: Meta): Filters {
     magRange: magBounds(meta),
     depthRange: depthBounds(meta),
     sources: meta.sources.map((s) => s.id),
+    declustered: false,
   };
 }
 
@@ -79,6 +83,7 @@ export function toServerQuery(filters: Filters, meta: Meta): ServerQuery {
   if (!all.every((id) => filters.sources.includes(id))) {
     q.sources = all.filter((id) => filters.sources.includes(id));
   }
+  if (filters.declustered) q.declustered = true;
   return q;
 }
 
@@ -96,6 +101,7 @@ function normalize(q: ServerQuery): ServerQuery {
     maxDepth: q.maxDepth,
     sources: q.sources ? [...q.sources].sort() : undefined,
     deadlyOnly: q.deadlyOnly || undefined,
+    declustered: q.declustered || undefined,
   };
 }
 
@@ -122,7 +128,8 @@ export function covers(loaded: ServerQuery, needed: ServerQuery): boolean {
     looserHigh(loaded.maxMag, needed.maxMag) &&
     depthOk &&
     sourcesOk &&
-    (!loaded.deadlyOnly || needed.deadlyOnly === true)
+    (!loaded.deadlyOnly || needed.deadlyOnly === true) &&
+    (!loaded.declustered || needed.declustered === true)
   );
 }
 
@@ -147,6 +154,7 @@ export function toSearchParams(q: ServerQuery): URLSearchParams {
   set('max_depth', q.maxDepth);
   q.sources?.forEach((s) => p.append('sources', s));
   if (q.deadlyOnly) p.set('deadly_only', 'true');
+  if (q.declustered) p.set('declustered', 'true');
   return p;
 }
 
@@ -192,6 +200,7 @@ export function summarizeEvents(
       events.time[i] < start || events.time[i] >= end ||
       magnitude < filters.magRange[0] - 1e-6 || magnitude > filters.magRange[1] + 1e-6 ||
       !enabled.has(events.source[i]) ||
+      (filters.declustered && isDependentRole(events.role[i])) ||
       (depthActive && (!Number.isFinite(depth) || depth < filters.depthRange[0] || depth > filters.depthRange[1]))
     ) continue;
 
@@ -266,4 +275,13 @@ export function gpuFilterRange(
     depth,
     [Math.min(...codes), Math.max(...codes)],
   ];
+}
+
+/**
+ * GPU category filter: category 1 marks foreshocks and aftershocks. deck.gl maps
+ * raw binary category values to bitmask bits in first-seen order, so 0 must
+ * always come first for the bits to line up with the values.
+ */
+export function gpuFilterCategories(filters: Filters): number[] {
+  return filters.declustered ? [0] : [0, 1];
 }

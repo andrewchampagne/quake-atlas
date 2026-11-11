@@ -18,6 +18,7 @@ function catalog(): EventColumns {
     magnitude: new Float32Array([9.1, 8, 9.1, 7, 7, 7, 7]),
     source: new Uint8Array([0, 1, 1, 1, 0, 1, 0]),
     deaths: new Float32Array([0, 12, -4, -2, Number.NaN, -1, 2000]),
+    role: new Uint8Array(7),
   };
 }
 
